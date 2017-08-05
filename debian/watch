@@ -1,0 +1,4 @@
+# try also https://pypi.debian.net/py3status/watch
+version=3
+opts=uversionmangle=s/(rc|a|b|c)/~$1/ \
+https://pypi.debian.net/py3status/py3status-(.+)\.(?:zip|tgz|tbz|txz|(?:tar\.(?:gz|bz2|xz)))
