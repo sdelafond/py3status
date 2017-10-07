@@ -22,12 +22,14 @@ class Module(Thread):
     PARAMS_NEW = 'new'
     PARAMS_LEGACY = 'legacy'
 
-    def __init__(self, module, user_modules, py3_wrapper):
+    def __init__(self, module, user_modules, py3_wrapper, instance=None):
         """
         We need quite some stuff to occupy ourselves don't we ?
         """
         Thread.__init__(self)
+
         self.allow_config_clicks = True
+        self.allow_urgent = None
         self.cache_time = None
         self.click_events = False
         self.config = py3_wrapper.config
@@ -40,7 +42,7 @@ class Module(Thread):
         self.last_output = []
         self.lock = py3_wrapper.lock
         self.methods = OrderedDict()
-        self.module_class = None
+        self.module_class = instance
         self.module_full_name = module
         self.module_inst = ''.join(module.split(' ')[1:])
         self.module_name = module.split(' ')[0]
@@ -49,6 +51,7 @@ class Module(Thread):
         self.prevent_refresh = False
         self.sleeping = False
         self.terminated = False
+        self.testing = self.config.get('testing')
         self.timer = None
         self.urgent = False
 
@@ -81,7 +84,14 @@ class Module(Thread):
             msg = 'Module `{}` could not be loaded'.format(
                 self.module_full_name
             )
-            self._py3_wrapper.report_exception(msg, notify_user=False)
+            if isinstance(e, SyntaxError):
+                # provide full traceback
+                self._py3_wrapper.report_exception(msg, notify_user=False)
+            else:
+                # module import error we can just report the module that cannot
+                # be imported
+                self._py3_wrapper.log(msg)
+                self._py3_wrapper.log(str(e))
 
     def __repr__(self):
         return '<Module {}>'.format(self.module_full_name)
@@ -144,9 +154,17 @@ class Module(Thread):
         """
         Show the error in the bar
         """
+        if self.testing:
+            self._py3_wrapper.report_exception(msg)
+            raise KeyboardInterrupt
+
         if self.error_hide:
             self.hide_errors()
             return
+
+        # only show first line of error
+        msg = msg.splitlines()[0]
+
         errors = [
             self.module_nice_name,
             u'{}: {}'.format(self.module_nice_name, msg),
@@ -263,10 +281,14 @@ class Module(Thread):
         for method in self.methods.values():
             data = method['last_output']
             if isinstance(data, list):
+                if self.testing:
+                    data[0]['cached_until'] = method.get('cached_until')
                 output.extend(data)
             else:
                 # if the output is not 'valid' then don't add it.
                 if data.get('full_text') or 'separator' in data:
+                    if self.testing:
+                        data['cached_until'] = method.get('cached_until')
                     output.append(data)
         # if changed store and force display update.
         if output != self.last_output:
@@ -393,8 +415,13 @@ class Module(Thread):
             # Remove any none color from our output
             if hasattr(item.get('color'), 'none_setting'):
                 del item['color']
+
+            # remove urgent if not allowed
+            if not self.allow_urgent:
+                if 'urgent' in item:
+                    del item['urgent']
             # if urgent we want to set this to all parts
-            if urgent and 'urgent' not in item:
+            elif urgent and 'urgent' not in item:
                 item['urgent'] = urgent
 
     def _params_type(self, method_name, instance):
@@ -438,22 +465,24 @@ class Module(Thread):
             - 'on_click' methods as they'll be called upon a click_event
             - 'kill' methods as they'll be called upon this thread's exit
         """
-        # user provided modules take precedence over py3status provided modules
-        if self.module_name in user_modules:
-            include_path, f_name = user_modules[self.module_name]
-            self._py3_wrapper.log(
-                'loading module "{}" from {}{}'.format(module, include_path,
-                                                       f_name))
-            class_inst = self.load_from_file(include_path + f_name)
-        # load from py3status provided modules
-        else:
-            self._py3_wrapper.log(
-                'loading module "{}" from py3status.modules.{}'.format(
-                    module, self.module_name))
-            class_inst = self.load_from_namespace(self.module_name)
+        if not self.module_class:
+            # user provided modules take precedence over py3status provided modules
+            if self.module_name in user_modules:
+                include_path, f_name = user_modules[self.module_name]
+                self._py3_wrapper.log(
+                    'loading module "{}" from {}{}'.format(module, include_path,
+                                                           f_name))
+                self.module_class = self.load_from_file(include_path + f_name)
+            # load from py3status provided modules
+            else:
+                self._py3_wrapper.log(
+                    'loading module "{}" from py3status.modules.{}'.format(
+                        module, self.module_name))
+                self.module_class = self.load_from_namespace(self.module_name)
 
+        class_inst = self.module_class
         if class_inst:
-            self.module_class = class_inst
+
             try:
                 # containers have items attribute set to a list of contained
                 # module instance names.  If there are no contained items then
@@ -597,6 +626,15 @@ class Module(Thread):
             if not hasattr(self.module_class, 'py3'):
                 setattr(self.module_class, 'py3', Py3(self))
 
+            # allow_urgent
+            # get the value form the config or use the module default if
+            # supplied.
+            fn = self._py3_wrapper.get_config_attribute
+            param = fn(self.module_full_name, 'allow_urgent')
+            if hasattr(param, 'none_setting'):
+                param = True
+            self.allow_urgent = param
+
             # get the available methods for execution
             for method in sorted(dir(class_inst)):
                 if method.startswith('_'):
@@ -737,6 +775,9 @@ class Module(Thread):
                         # Remove any none color from our output
                         if hasattr(result.get('color'), 'none_setting'):
                             del result['color']
+                        # remove urgent if not allowed
+                        if not self.allow_urgent and 'urgent' in result:
+                            del result['urgent']
                         # set universal module options in result
                         result.update(self.module_options)
 
@@ -769,9 +810,6 @@ class Module(Thread):
                     else:
                         my_method['last_output'] = result
 
-                    # mark module as updated
-                    self.set_updated()
-
                     # debug info
                     if self.config['debug']:
                         self._py3_wrapper.log(
@@ -781,6 +819,10 @@ class Module(Thread):
                     self.allow_config_clicks = True
                     self.error_messages = None
                     self.error_hide = False
+
+                    # mark module as updated
+                    self.set_updated()
+
                 except ModuleErrorException as e:
                     # module has indicated that it has an error
                     self.runtime_error(e.msg, meth)
@@ -797,7 +839,8 @@ class Module(Thread):
                 except Exception as e:
                     msg = 'Instance `{}`, user method `{}` failed'
                     msg = msg.format(self.module_full_name, meth)
-                    self._py3_wrapper.report_exception(msg, notify_user=False)
+                    if not self.testing:
+                        self._py3_wrapper.report_exception(msg, notify_user=False)
                     # added error
                     self.runtime_error(str(e) or e.__class__.__name__, meth)
                     cache_time = time() + getattr(self.module_class,
