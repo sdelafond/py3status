@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: py3status
-Version: 3.6
+Version: 3.7
 Summary: py3status: an extensible i3status wrapper written in python
 Home-page: https://github.com/ultrabug/py3status
 Author: Ultrabug
