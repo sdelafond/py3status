@@ -7,8 +7,8 @@ Build-Depends: debhelper (>= 9), dh-python,
                python3-setuptools,
 Standards-Version: 4.0.0
 Homepage: https://github.com/ultrabug/py3status
-Vcs-Git: https://anonscm.debian.org/git/collab-maint/py3status.git
-Vcs-Browser: https://anonscm.debian.org/?p=collab-maint/py3status.git;a=summary
+Vcs-Git: https://salsa.debian.org/debian/py3status.git
+Vcs-Browser: https://salsa.debian.org/debian/py3status
 
 Package: py3status
 Architecture: all
