@@ -1,5 +1,5 @@
 Source: py3status
-Section: python
+Section: utils
 Priority: optional
 Maintainer: Sebastien Delafond <seb@debian.org>
 Build-Depends: debhelper (>= 9), dh-python,
