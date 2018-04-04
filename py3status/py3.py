@@ -13,8 +13,10 @@ from subprocess import Popen, PIPE, STDOUT
 from time import time
 
 from py3status import exceptions
+from py3status.constants import COLOR_NAMES
 from py3status.formatter import Formatter, Composite
 from py3status.request import HttpResponse
+from py3status.storage import Storage
 from py3status.util import Gradiants
 
 
@@ -90,6 +92,7 @@ class Py3:
     _formatter = None
     _gradients = Gradiants()
     _none_color = NoneColor()
+    _storage = Storage()
 
     # Exceptions
     Py3Exception = exceptions.Py3Exception
@@ -102,6 +105,8 @@ class Py3:
     def __init__(self, module=None):
         self._audio = None
         self._config_setting = {}
+        self._english_env = dict(os.environ)
+        self._english_env['LC_ALL'] = 'C'
         self._format_placeholders = {}
         self._format_placeholders_cache = {}
         self._is_python_2 = sys.version_info < (3, 0)
@@ -144,7 +149,8 @@ class Py3:
             # not set should be treated as None
             if name.startswith('color_'):
                 if hasattr(param, 'none_setting'):
-                    param = None
+                    # see if named color and use if it is
+                    param = COLOR_NAMES.get(name[6:].lower())
                 elif param is None:
                     param = self._none_color
             # if a non-color parameter and was not set then set to default
@@ -508,9 +514,14 @@ class Py3:
         # force unicode for python2 str
         if self._is_python_2 and isinstance(msg, str):
             msg = msg.decode('utf-8')
-        module_name = self._module.module_full_name
-        self._py3_wrapper.notify_user(
-            msg, level=level, rate_limit=rate_limit, module_name=module_name)
+        if msg:
+            module_name = self._module.module_full_name
+            self._py3_wrapper.notify_user(
+                msg=msg,
+                level=level,
+                rate_limit=rate_limit,
+                module_name=module_name,
+            )
 
     def register_function(self, function_name, function):
         """
@@ -558,17 +569,22 @@ class Py3:
             ``cached_until`` in their response unless they wish to directly control
             it.
 
-        seconds specifies the number of seconds that should occure before the
-        update is required.
+        :param seconds: specifies the number of seconds that should occure before the
+            update is required.  Passing a value of ``CACHE_FOREVER`` returns
+            ``CACHE_FOREVER`` which can be useful for some modules.
 
-        sync_to causes the update to be syncronised to a time period.  1 would
-        cause the update on the second, 60 to the nearest minute. By defalt we
-        syncronise to the nearest second. 0 will disable this feature.
+        :param sync_to: causes the update to be syncronised to a time period.  1 would
+            cause the update on the second, 60 to the nearest minute. By defalt we
+            syncronise to the nearest second. 0 will disable this feature.
 
-        offset is used to alter the base time used. A timer that started at a
-        certain time could set that as the offset and any syncronisation would
-        then be relative to that time.
+        :param offset: is used to alter the base time used. A timer that started at a
+            certain time could set that as the offset and any syncronisation would
+            then be relative to that time.
         """
+
+        # if called with CACHE_FOREVER we just return this
+        if seconds is self.CACHE_FOREVER:
+            return self.CACHE_FOREVER
 
         if seconds is None:
             # If we have a sync_to then seconds can be 0
@@ -687,6 +703,17 @@ class Py3:
         eg ``'{placeholder:.2f}'`` will give ``[('placeholder', ':.2f')]``
         """
         return self._formatter.get_placeholder_formats_list(format_string)
+
+    def update_placeholder_formats(self, format_string, formats):
+        """
+        Update a format string adding formats if they are not already present.
+        This is useful when for example a placeholder has a floating point
+        value but by default we only want to show it to a certain precision.
+        """
+
+        return self._formatter.update_placeholder_formats(
+            format_string, formats
+        )
 
     def safe_format(self, format_string, param_dict=None,
                     force_composite=False, attr_getter=None):
@@ -864,7 +891,7 @@ class Py3:
             msg = 'Command `{cmd}` {error}'.format(cmd=pretty_cmd, error=e.errno)
             raise exceptions.CommandError(msg, error_code=e.errno)
 
-    def command_output(self, command, shell=False, capture_stderr=False):
+    def command_output(self, command, shell=False, capture_stderr=False, localized=False):
         """
         Run a command and return its output as unicode.
         The command can either be supplied as a sequence or string.
@@ -872,28 +899,32 @@ class Py3:
         :param command: command to run can be a str or list
         :param shell: if `True` then command is run through the shell
         :param capture_stderr: if `True` then STDERR is piped to STDOUT
+        :param localized: if `False` then command is forced to use its default (English) locale
 
         A CommandError is raised if an error occurs
         """
         # make a pretty command for error loggings and...
-        # convert the non-shell command to sequence if it is a string
-        if not shell and isinstance(command, basestring):
+        if isinstance(command, basestring):
             pretty_cmd = command
-            command = shlex.split(command)
         else:
             pretty_cmd = ' '.join(command)
+        # convert the non-shell command to sequence if it is a string
+        if not shell and isinstance(command, basestring):
+            command = shlex.split(command)
 
         stderr = STDOUT if capture_stderr else PIPE
+        env = self._english_env if not localized else None
 
         try:
             process = Popen(command, stdout=PIPE, stderr=stderr, close_fds=True,
-                            universal_newlines=True, shell=shell)
+                            universal_newlines=True, shell=shell,
+                            env=env)
         except Exception as e:
             msg = 'Command `{cmd}` {error}'.format(cmd=pretty_cmd, error=e)
             raise exceptions.CommandError(msg, error_code=e.errno)
 
         output, error = process.communicate()
-        if self._is_python_2:
+        if self._is_python_2 and isinstance(output, str):
             output = output.decode('utf-8')
             error = error.decode('utf-8')
         retcode = process.poll()
@@ -922,6 +953,76 @@ class Py3:
                 msg, error_code=retcode, error=error, output=output
             )
         return output
+
+    def _storage_init(self):
+        """
+        Ensure that storage is initialized.
+        """
+        if not self._storage.initialized:
+            self._storage.init(self._module._py3_wrapper, self._is_python_2)
+
+    def storage_set(self, key, value):
+        """
+        Store a value for the module.
+        """
+        if not self._module:
+            return
+        self._storage_init()
+        module_name = self._module.module_full_name
+        return self._storage.storage_set(module_name, key, value)
+
+    def storage_get(self, key):
+        """
+        Retrieve a value for the module.
+        """
+        if not self._module:
+            return
+        self._storage_init()
+        module_name = self._module.module_full_name
+        return self._storage.storage_get(module_name, key)
+
+    def storage_del(self, key=None):
+        """
+        Remove the value stored with the key from storage.
+        If key is not supplied then all values for the module are removed.
+        """
+        if not self._module:
+            return
+        self._storage_init()
+        module_name = self._module.module_full_name
+        return self._storage.storage_del(module_name, key=key)
+
+    def storage_keys(self):
+        """
+        Return a list of the keys for values stored for the module.
+
+        Keys will contain the following metadata entries:
+        - '_ctime': storage creation timestamp
+        - '_mtime': storage last modification timestamp
+        """
+        if not self._module:
+            return []
+        self._storage_init()
+        module_name = self._module.module_full_name
+        return self._storage.storage_keys(module_name)
+
+    def storage_items(self):
+        """
+        Return key, value pairs of the stored data for the module.
+
+        Keys will contain the following metadata entries:
+        - '_ctime': storage creation timestamp
+        - '_mtime': storage last modification timestamp
+        """
+        if not self._module:
+            return {}.items()
+        self._storage_init()
+        items = []
+        module_name = self._module.module_full_name
+        for key in self._storage.storage_keys(module_name):
+            value = self._storage.storage_get(module_name, key)
+            items.add((key, value))
+        return items
 
     def play_sound(self, sound_file):
         """
@@ -960,17 +1061,20 @@ class Py3:
             self._thresholds_init()
 
         color = None
-        try:
-            value = float(value)
-        except ValueError:
-            color = self._get_color('error') or self._get_color('bad')
+        # if value is None, pass it along. otherwise try it.
+        if value is not None:
+            try:
+                value = float(value)
+            except ValueError:
+                color = self._get_color('error') or self._get_color('bad')
 
         # if name not in thresholds info then use defaults
         name_used = name
         if name_used not in self._thresholds:
             name_used = None
         thresholds = self._thresholds.get(name_used)
-        if color is None and thresholds:
+        # if value is None, pass it along. otherwise try it.
+        if value is not None and color is None and thresholds:
             # if gradients are enabled then we use them
             if self._get_config_setting('gradients'):
                 try:
@@ -982,12 +1086,13 @@ class Py3:
                     self._threshold_gradients[name_used] = (colors, minimum, maximum)
 
                 if value < minimum:
-                    return colors[0]
-                if value > maximum:
-                    return colors[-1]
-                value -= minimum
-                col_index = int(((len(colors) - 1) / (maximum - minimum)) * value)
-                color = colors[col_index]
+                    color = colors[0]
+                elif value > maximum:
+                    color = colors[-1]
+                else:
+                    value -= minimum
+                    col_index = int(((len(colors) - 1) / (maximum - minimum)) * value)
+                    color = colors[col_index]
 
             elif color is None:
                 color = thresholds[0][1]
@@ -1007,7 +1112,7 @@ class Py3:
         return color
 
     def request(self, url, params=None, data=None, headers=None,
-                timeout=None, auth=None):
+                timeout=None, auth=None, cookiejar=None):
         """
         Make a request to a url and retrieve the results.
 
@@ -1017,6 +1122,7 @@ class Py3:
         :param headers: http headers to be added to the request as a dict
         :param timeout: timeout for the request in seconds
         :param auth: authentication info as tuple `(username, password)`
+        :param cookiejar: an object of a CookieJar subclass
 
         :returns: HttpResponse
         """
@@ -1038,4 +1144,5 @@ class Py3:
                             data=data,
                             headers=headers,
                             timeout=timeout,
-                            auth=auth)
+                            auth=auth,
+                            cookiejar=cookiejar)
