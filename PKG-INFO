@@ -1,13 +1,12 @@
-Metadata-Version: 1.1
+Metadata-Version: 2.1
 Name: py3status
-Version: 3.8
+Version: 3.10
 Summary: py3status: an extensible i3status wrapper written in python
 Home-page: https://github.com/ultrabug/py3status
 Author: Ultrabug
 Author-email: ultrabug@ultrabug.net
 License: BSD
 Download-URL: https://github.com/ultrabug/py3status/tags
-Description-Content-Type: UNKNOWN
 Description: *********
         py3status
         *********
@@ -196,6 +195,11 @@ Description: *********
         
             killall -USR1 py3status
         
+        To refresh individual modules, the `py3-cmd <http://py3status.readthedocs.io/en/latest/py3-cmd.html>`_ utility can be used, e.g.:
+        ::
+        
+           py3-cmd refresh wifi
+        
 Platform: any
 Classifier: License :: OSI Approved :: BSD License
 Classifier: Operating System :: POSIX :: Linux
@@ -209,3 +213,4 @@ Classifier: Programming Language :: Python :: 3.4
 Classifier: Programming Language :: Python :: 3.5
 Classifier: Programming Language :: Python :: 3.6
 Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Provides-Extra: gevent
