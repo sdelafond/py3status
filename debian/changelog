@@ -1,3 +1,9 @@
+py3status (3.10-1) unstable; urgency=medium
+
+  * New upstream version 3.10
+
+ -- Sebastien Delafond <seb@debian.org>  Thu, 21 Jun 2018 15:15:16 +0200
+
 py3status (3.8-1) unstable; urgency=medium
 
   * Switch to DEP 14
