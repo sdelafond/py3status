@@ -1,12 +1,8 @@
-.gitignore
-.travis.yml
 CHANGELOG
 LICENSE
 MANIFEST.in
 README.rst
 setup.py
-tox.ini
-doc/Makefile
 doc/README.md
 doc/conf.py
 doc/configuration.rst
@@ -18,7 +14,6 @@ doc/intro.rst
 doc/modules.rst
 doc/py3-cmd.rst
 doc/py3.rst
-doc/py3status.html
 doc/writing_modules.rst
 py3status/__init__.py
 py3status/autodoc.py
@@ -50,7 +45,6 @@ py3status.egg-info/dependency_links.txt
 py3status.egg-info/entry_points.txt
 py3status.egg-info/requires.txt
 py3status.egg-info/top_level.txt
-py3status/modules/README.md
 py3status/modules/__init__.py
 py3status/modules/air_quality.py
 py3status/modules/apt_updates.py
