@@ -72,6 +72,7 @@ py3status/modules/file_status.py
 py3status/modules/frame.py
 py3status/modules/getjson.py
 py3status/modules/github.py
+py3status/modules/gitlab.py
 py3status/modules/glpi.py
 py3status/modules/google_calendar.py
 py3status/modules/gpmdp.py
@@ -131,6 +132,7 @@ py3status/modules/whoami.py
 py3status/modules/wifi.py
 py3status/modules/window_title.py
 py3status/modules/window_title_async.py
+py3status/modules/wwan.py
 py3status/modules/wwan_status.py
 py3status/modules/xrandr.py
 py3status/modules/xrandr_rotate.py
