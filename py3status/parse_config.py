@@ -9,6 +9,7 @@ from string import Template
 from subprocess import check_output, CalledProcessError
 
 from py3status.constants import (
+    CONFIG_FILE_SPECIAL_SECTIONS,
     I3S_SINGLE_NAMES,
     I3S_MODULE_NAMES,
     MAX_NESTING_LEVELS,
@@ -35,9 +36,12 @@ class ParseException(Exception):
         self.position = position
         self.token = token.replace('\n', '\\n')
 
-    def one_line(self):
-        return 'CONFIG ERROR: {} saw `{}` at line {} position {}'.format(
-            self.error, self.token, self.line_no, self.position)
+    def one_line(self, config_path):
+        filename = os.path.basename(config_path)
+        notif = 'CONFIG ERROR: {} saw `{}` at line {} position {} in file {}'
+        return notif.format(
+            self.error, self.token, self.line_no, self.position, filename
+        )
 
     def __str__(self):
         marker = ' ' * (self.position - 1) + '^'
@@ -122,11 +126,15 @@ class ConfigParser:
 
     '''
 
+    CONVERSIONS = '(auto|bool|int|float|str)'
+    FUNCTIONS = '(base64|env|hide|shell)'
+
     TOKENS = [
         '#.*$'  # comments
-        # environment variables
-        '|(?P<env_var>env\(\s*([0-9a-zA-Z_]+)(\s*,\s*[a-zA-Z_]+)?\s*\))'
-        '|(?P<shell>shell\(.+?(\s*,\s*(int|float|str|bool|auto))?\))'  # shell code
+        '|(?P<function>'  # functions of the form `name(payload[,type])`
+        '' + FUNCTIONS + r'\(\s*(([^)\\]|\\.)*?)'  # nasty '' but flake8
+        '(\s*,\s*' + CONVERSIONS + ')?\s*\))'
+
         '|(?P<operator>[()[\]{},:]|\+?=)'  # operators
         '|(?P<literal>'
         r'("(?:[^"\\]|\\.)*")'  # double quoted string
@@ -139,7 +147,7 @@ class ConfigParser:
         '|(?P<unknown>\S+)'  # unknown token
     ]
 
-    def __init__(self, config):
+    def __init__(self, config, py3_wrapper):
         self.tokenize(config)
         self.config = {}
         self.level = 0
@@ -148,9 +156,16 @@ class ConfigParser:
         self.current_token = 0
         self.line = 0
         self.line_start = 0
+        self.py3_wrapper = py3_wrapper
         self.raw = config.split('\n')
         self.container_modules = []
         self.anon_count = 0
+
+    def notify_user(self, error):
+        if self.py3_wrapper:
+            self.py3_wrapper.notify_user(error)
+        else:
+            print(error)
 
     class ParseEnd(Exception):
         '''
@@ -177,7 +192,7 @@ class ConfigParser:
         (file, pathname, description) = info
         try:
             py_mod = imp.load_module(name, file, pathname, description)
-        except:
+        except Exception:
             # We cannot load the module!  We could error out here but then the
             # user gets informed that the problem is with their config.  This
             # is not correct.  Better to say that all is well and then the
@@ -242,16 +257,15 @@ class ConfigParser:
                 t_type = 'literal'
             elif token.group('newline'):
                 t_type = 'newline'
-            elif token.group('env_var'):
-                t_type = 'env_var'
-            elif token.group('shell'):
-                t_type = 'shell'
+            elif token.group('function'):
+                t_type = 'function'
             elif token.group('unknown'):
                 t_type = 'unknown'
             else:
                 continue
             tokens.append({'type': t_type,
                            'value': value,
+                           'match': token,
                            'start': token.start()})
         self.tokens = tokens
 
@@ -271,14 +285,18 @@ class ConfigParser:
             self.error('Unknown token')
         return token
 
-    def make_name(self, value):
+    def remove_quotes(self, value):
         '''
         Remove any surrounding quotes from a value and unescape any contained
         quotes of that type.
         '''
-        if value.startswith('"'):
+        # beware the empty string
+        if not value:
+            return value
+
+        if value[0] == value[-1] == '"':
             return value[1:-1].replace('\\"', '"')
-        if value.startswith("'"):
+        if value[0] == value[-1] == "'":
             return value[1:-1].replace("\\'", "'")
         return value
 
@@ -287,7 +305,7 @@ class ConfigParser:
         It is possible to define unicode characters in the config either as the
         actual utf-8 character or using escape sequences the following all will
         show the Greek delta character.
-        Δ \N{GREEK CAPITAL LETTER DELTA} \U00000394  \u0349
+        Δ \N{GREEK CAPITAL LETTER DELTA} \U00000394  \u0394
         '''
         def fix_fn(match):
             # we don't escape an escaped backslash
@@ -295,7 +313,7 @@ class ConfigParser:
                 return r'\\'
             return match.group(0).encode('utf-8').decode('unicode-escape')
         return re.sub(
-            '\\\\\\\\|\\\\u\w{4}|\\\\U\w{8}|\\\\N\{.+\}', fix_fn, value
+            r'\\\\|\\u\w{4}|\\U\w{8}|\\N\{([^}\\]|\\.)+\}', fix_fn, value
         )
 
     def make_value(self, value):
@@ -305,17 +323,16 @@ class ConfigParser:
         # ensure any escape sequences are converted to unicode
         value = self.unicode_escape_sequence_fix(value)
 
-        if value.startswith('"'):
-            return value[1:-1].replace('\\"', '"')
-        if value.startswith("'"):
-            return value[1:-1].replace("\\'", "'")
+        if value and value[0] in ['"', "'"]:
+            return self.remove_quotes(value)
+
         try:
             return int(value)
-        except:
+        except ValueError:
             pass
         try:
             return float(value)
-        except:
+        except ValueError:
             pass
         if value.lower() == 'true':
             return True
@@ -325,19 +342,32 @@ class ConfigParser:
             return None
         return value
 
-    def make_value_from_env(self, value):
-        # Extract the environment variable and type
-        match = re.match(
-            'env\(\s*([0-9a-zA-Z_]+)(\s*,\s*[a-zA-Z_]+)?\s*\)', value)
-        env_var, env_type = match.groups()
-        if not env_type:
-            env_type = 'auto'
-        else:
-            # Remove comma and whitespace from match
-            # i.e '   ,  my_conversion' -> 'my_conversion'
-            env_type = env_type.strip()[1:].lstrip()
+    def config_function(self, token):
+        """
+        Process a config function from a token
+        """
+        match = token['match']
+        function = match.group(2).lower()
+        param = match.group(3) or ''
+        value_type = match.group(6) or 'auto'
 
-        conversion_options = {
+        # fix any escaped closing parenthesis
+        param = param.replace('\)', ')')
+
+        CONFIG_FUNCTIONS = {
+            'base64': self.make_function_value_private,
+            'env': self.make_value_from_env,
+            'hide': self.make_function_value_private,
+            'shell': self.make_value_from_shell,
+        }
+
+        return CONFIG_FUNCTIONS[function](param, value_type, function)
+
+    def value_convert(self, value, value_type):
+        """
+        convert string into type used by `config functions`
+        """
+        CONVERSION_OPTIONS = {
             'str': str,
             'int': int,
             'float': float,
@@ -348,44 +378,85 @@ class ConfigParser:
             # Auto-guess the type
             'auto': self.make_value,
         }
-        if env_type not in conversion_options:
-            self.error('Invalid env conversion function in env_var')
 
-        # Check the environment variable
-        # TODO: dynamic support, (lambda: os.getenv(env_var))
-        value = os.getenv(env_var)
+        try:
+            return CONVERSION_OPTIONS[value_type](value)
+        except (TypeError, ValueError):
+            self.notify_user('Bad type conversion')
+            return None
+
+    def make_value_from_env(self, param, value_type, function):
+        """
+        get environment variable
+        """
+        value = os.getenv(param)
         if value is None:
-            self.error('Environment variable \'%s\' undefined' % env_var)
+            self.notify_user('Environment variable `%s` undefined' % param)
+        return self.value_convert(value, value_type)
 
+    def make_value_from_shell(self, param, value_type, function):
+        """
+        run command in the shell
+        """
         try:
-            return conversion_options[env_type](value)
-        except ValueError:
-            self.error('Bad conversion')
-
-    def make_value_from_shell(self, value):
-        conversion_options = {
-            'int': int,
-            'float': float,
-            'str': str,
-
-            'bool': (lambda val: val.lower() in ('', 'true', '1')),
-            'auto': self.make_value,
-        }
-
-        match = re.match('shell\((.+?)(\s*,\s*(int|float|str|bool|auto))?\)', value)
-        shell, _, var_type = match.groups()
-        try:
-            shell_stdout = str(check_output(shell, shell=True).rstrip(), encoding='utf-8')
+            value = check_output(param, shell=True).rstrip()
         except CalledProcessError:
-            if var_type is not None and var_type.lower() == 'bool':
-                return False
-            self.error('shell script exited with an error')
-        if var_type is None:
-            return shell_stdout
-        try:
-            return conversion_options[var_type](shell_stdout)
-        except ValueError:
-            self.error('Bad conversion')
+            # for value_type of 'bool' we return False on error code
+            if value_type == 'bool':
+                value = False
+            else:
+                if self.py3_wrapper:
+                    self.py3_wrapper.report_exception(
+                        msg='shell: called with command `%s`' % param
+                    )
+                self.notify_user('shell script exited with an error')
+                value = None
+        else:
+            # if the value_type is 'bool' then we return True for success
+            if value_type == 'bool':
+                value = True
+            else:
+                # convert bytes to unicode
+                value = value.decode('utf-8')
+                value = self.value_convert(value, value_type)
+        return value
+
+    def make_function_value_private(self, value, value_type, function):
+        """
+        Wraps converted value so that it is hidden in logs etc.
+        Note this is not secure just reduces leaking info
+
+        Allows base 64 encode stuff using base64() or plain hide() in the
+        config
+        """
+        # remove quotes
+        value = self.remove_quotes(value)
+
+        if function == 'base64':
+            try:
+                import base64
+                value = base64.b64decode(value).decode('utf-8')
+            except TypeError as e:
+                self.notify_user('base64(..) error %s' % str(e))
+
+        # check we are in a module definition etc
+        if not self.current_module:
+            self.notify_user(
+                '%s(..) used outside of module or section' % function
+            )
+            return None
+
+        module = self.current_module[-1].split()[0]
+        if module in CONFIG_FILE_SPECIAL_SECTIONS + I3S_MODULE_NAMES:
+            self.notify_user(
+                '%s(..) cannot be used outside of py3status module '
+                'configuration' % function
+            )
+            return None
+
+        value = self.value_convert(value, value_type)
+        module_name = self.current_module[-1]
+        return PrivateHide(value, module_name)
 
     def separator(self, separator=',', end_token=None):
         '''
@@ -465,10 +536,8 @@ class ConfigParser:
                     continue
             if token['type'] == 'literal':
                 return self.make_value(t_value)
-            if token['type'] == 'env_var':
-                return self.make_value_from_env(t_value)
-            if token['type'] == 'shell':
-                return self.make_value_from_shell(t_value)
+            if token['type'] == 'function':
+                return self.config_function(token)
             elif t_value == '[':
                 return self.make_list()
             elif t_value == '{':
@@ -553,14 +622,12 @@ class ConfigParser:
                 self.level -= 1
                 return
             elif t_type == 'literal':
-                value = self.make_name(t_value)
+                value = self.remove_quotes(t_value)
                 if not name and not re.match('[a-zA-Z_]', value):
                     self.error('Invalid name')
                 name.append(value)
-            elif t_type == 'env_var':
+            elif t_type == 'function':
                 self.error('Name expected')
-            elif t_type == 'shell':
-                self.error('Shell command expected')
             elif t_type == 'operator':
                 name = ' '.join(name)
                 if not name:
@@ -627,11 +694,21 @@ def process_config(config_path, py3_wrapper=None):
 
         if hasattr(config, 'readlines'):
             config = ''.join(config.readlines())
-        parser = ConfigParser(config)
+        parser = ConfigParser(config, py3_wrapper)
         parser.parse()
         parsed = parser.config
         del parser
         return parsed
+
+    def parse_config_error(e, config_path):
+        # There was a problem use our special error config
+        error = e.one_line(config_path)
+        notify_user(error)
+        # to display correctly in i3bar we need to do some substitutions
+        for char in ['"', '{', '|']:
+            error = error.replace(char, '\\' + char)
+        error_config = Template(ERROR_CONFIG).substitute(error=error)
+        return parse_config(error_config)
 
     config = {}
 
@@ -644,18 +721,18 @@ def process_config(config_path, py3_wrapper=None):
     except CalledProcessError:
         # bsd does not have the --mime-encoding so assume utf-8
         encoding = 'utf-8'
-    with codecs.open(config_path, 'r', encoding) as f:
-        try:
-            config_info = parse_config(f)
-        except ParseException as e:
-            # There was a problem use our special error config
-            error = e.one_line()
-            notify_user(error)
-            # to display correctly in i3bar we need to do some substitutions
-            for char in ['"', '{', '|']:
-                error = error.replace(char, '\\' + char)
-            error_config = Template(ERROR_CONFIG).substitute(error=error)
-            config_info = parse_config(error_config)
+    try:
+        with codecs.open(config_path, 'r', encoding) as f:
+            try:
+                config_info = parse_config(f)
+            except ParseException as e:
+                config_info = parse_config_error(e, config_path)
+    except LookupError:
+        with codecs.open(config_path) as f:
+            try:
+                config_info = parse_config(f)
+            except ParseException as e:
+                config_info = parse_config_error(e, config_path)
 
     # update general section with defaults
     general_defaults = GENERAL_DEFAULTS.copy()
