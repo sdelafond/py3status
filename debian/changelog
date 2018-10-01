@@ -1,3 +1,10 @@
+py3status (3.13-1) unstable; urgency=medium
+
+  * New upstream version 3.13 (Closes: #908490)
+  * Bump up Standards-Version
+
+ -- Sebastien Delafond <seb@debian.org>  Mon, 01 Oct 2018 12:01:17 -0700
+
 py3status (3.12-1) unstable; urgency=medium
 
   * New upstream version 3.12
