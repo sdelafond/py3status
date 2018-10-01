@@ -1,8 +1,14 @@
+.gitignore
+.travis.yml
 CHANGELOG
 LICENSE
 MANIFEST.in
 README.rst
+fastentrypoints.py
 setup.py
+tox.ini
+.git-hooks/pre-push
+doc/Makefile
 doc/README.md
 doc/conf.py
 doc/configuration.rst
@@ -14,6 +20,7 @@ doc/intro.rst
 doc/modules.rst
 doc/py3-cmd.rst
 doc/py3.rst
+doc/py3status.html
 doc/writing_modules.rst
 py3status/__init__.py
 py3status/autodoc.py
@@ -37,6 +44,7 @@ py3status/py3.py
 py3status/request.py
 py3status/screenshots.py
 py3status/storage.py
+py3status/udev_monitor.py
 py3status/util.py
 py3status/version.py
 py3status.egg-info/PKG-INFO
@@ -45,6 +53,7 @@ py3status.egg-info/dependency_links.txt
 py3status.egg-info/entry_points.txt
 py3status.egg-info/requires.txt
 py3status.egg-info/top_level.txt
+py3status/modules/README.md
 py3status/modules/__init__.py
 py3status/modules/air_quality.py
 py3status/modules/apt_updates.py
@@ -88,6 +97,9 @@ py3status/modules/insync.py
 py3status/modules/kdeconnector.py
 py3status/modules/keyboard_layout.py
 py3status/modules/keyboard_locks.py
+py3status/modules/lm_sensors.py
+py3status/modules/loadavg.py
+py3status/modules/mail.py
 py3status/modules/moc.py
 py3status/modules/mpd_status.py
 py3status/modules/mpris.py
@@ -95,6 +107,7 @@ py3status/modules/net_iplist.py
 py3status/modules/net_rate.py
 py3status/modules/netdata.py
 py3status/modules/ns_checker.py
+py3status/modules/nvidia_smi.py
 py3status/modules/nvidia_temp.py
 py3status/modules/online_status.py
 py3status/modules/pingdom.py
@@ -111,12 +124,14 @@ py3status/modules/screenshot.py
 py3status/modules/selinux.py
 py3status/modules/spaceapi.py
 py3status/modules/spotify.py
+py3status/modules/sql.py
 py3status/modules/static_string.py
 py3status/modules/sysdata.py
 py3status/modules/systemd.py
 py3status/modules/taskwarrior.py
 py3status/modules/thunderbird_todos.py
 py3status/modules/timer.py
+py3status/modules/timewarrior.py
 py3status/modules/tor_rate.py
 py3status/modules/transmission.py
 py3status/modules/twitch.py
@@ -125,6 +140,7 @@ py3status/modules/uptime.py
 py3status/modules/vnstat.py
 py3status/modules/volume_status.py
 py3status/modules/vpn_status.py
+py3status/modules/wanda_the_fish.py
 py3status/modules/weather_owm.py
 py3status/modules/weather_yahoo.py
 py3status/modules/whatismyip.py

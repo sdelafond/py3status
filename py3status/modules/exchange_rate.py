@@ -44,23 +44,22 @@ class Py3status:
         )
         self.rates_data = {currency: '?' for currency in self.currencies}
 
-    def rates(self):
+    def exchange_rate(self):
         try:
-            result = self.py3.request(
+            data = self.py3.request(
                 URL, timeout=self.request_timeout
-            )
+            ).json()
         except self.py3.RequestException:
-            result = None
-        rates = {}
-        if result:
-            data = result.json()
+            data = None
+        if data:
+            rates = {}
             for item in data:
                 rates[item['currency_code']] = item['rate']
             base_rate = 1.0 / rates.get(self.base)
             for currency in self.currencies:
                 try:
                     rate = rates[currency] * base_rate
-                except:
+                except KeyError:
                     rate = '?'
                 self.rates_data[currency] = rate
 
