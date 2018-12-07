@@ -1,3 +1,9 @@
+py3status (3.14-1) unstable; urgency=medium
+
+  * New upstream version 3.14 (Closes: #915885)
+
+ -- Sebastien Delafond <seb@debian.org>  Fri, 07 Dec 2018 16:49:25 +0100
+
 py3status (3.13-1) unstable; urgency=medium
 
   * New upstream version 3.13 (Closes: #908490)
