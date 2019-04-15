@@ -5,7 +5,7 @@ Maintainer: Sebastien Delafond <seb@debian.org>
 Build-Depends: debhelper (>= 9), dh-python,
                python3-all,
                python3-setuptools,
-Standards-Version: 4.2.0
+Standards-Version: 4.3.0
 Homepage: https://github.com/ultrabug/py3status
 Vcs-Git: https://salsa.debian.org/debian/py3status.git
 Vcs-Browser: https://salsa.debian.org/debian/py3status
