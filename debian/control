@@ -12,7 +12,7 @@ Vcs-Browser: https://salsa.debian.org/debian/py3status
 
 Package: py3status
 Architecture: all
-Depends: ${misc:Depends}, ${python3:Depends}, i3status
+Depends: ${misc:Depends}, ${python3:Depends}, i3status, file
 Recommends: ${python3:Recommends}
 Suggests: ${python3:Suggests}
 Description: extensible i3status wrapper written in Python (Python3 package)
