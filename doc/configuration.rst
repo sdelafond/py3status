@@ -1,20 +1,32 @@
-﻿.. _using_modules:
+﻿.. _configuration:
 
-Using modules
+Configuration
 =============
 
 py3status comes with a large range of :ref:`modules`.
-Modules in py3status are configured using your usual ``i3status.conf``.
 
-py3status tries to find the config in the following locations:
+Modules in py3status are configured using your usual ``i3status.conf`` or your
+own ``py3status.conf`` which follows the exact same format.
 
-- ``~/.i3/i3status.conf``
-- ``~/.i3status.conf``
-- ``/etc/i3status.conf``
-- ``XDG_CONFIG_HOME/.config/i3status/config``
+py3status will try to find its configuration file in the following locations:
+
+- ``~/.config/py3status/config``
 - ``~/.config/i3status/config``
-- ``XDG_CONFIG_DIRS/i3status/config``
+- ``~/.config/i3/i3status.conf``
+- ``~/.i3status.conf``
+- ``~/.i3/i3status.conf``
 - ``/etc/xdg/i3status/config``
+- ``/etc/i3status.conf``
+
+which if you are used to XDG_CONFIG paths relates to:
+
+- ``XDG_CONFIG_HOME/py3status/config``
+- ``XDG_CONFIG_HOME/i3status/config``
+- ``XDG_CONFIG_HOME/i3/i3status.conf``
+- ``~/.i3status.conf``
+- ``~/.i3/i3status.conf``
+- ``XDG_CONFIG_DIRS/i3status/config``
+- ``/etc/i3status.conf``
 
 You can also specify the config location using ``py3status -c <path to config
 file>`` in your i3 configuration file.
@@ -41,7 +53,6 @@ For example you could insert and load the ``imap`` module like this:
     order += "time"
 
 
-
 Configuring a py3status module
 ------------------------------
 
@@ -61,6 +72,7 @@ Your py3status modules are configured the exact same way as i3status modules, di
         user = 'mylogin'
         on_click 1 = "exec thunderbird"
     }
+
 
 py3status configuration section
 -------------------------------
@@ -132,16 +144,149 @@ Store per config cache in different directories.
 
 You can specify the following options in module configuration.
 
- ``min_length``: Specify a minimum length (of characters) for modules.
- ``position``: Specify how modules should be positioned when the ``min_length``
- is not reached. Either ``left`` (default), ``center``, or ``right``.
+- ``min_length``: Specify a minimum length of characters for modules.
+- ``position``: Specify how modules should be positioned when the ``min_length``
+  is not reached. Either ``left`` (default), ``center``, or ``right``.
 
 .. code-block:: py3status
-     # example
+
     static_string {
         min_length = 15
         position = 'center'
     }
+
+.. note::
+    New in version 3.16
+
+You can specify the options in module or py3status configuration section.
+
+The following options will work on ``i3``.
+
+- ``align``: Specify how modules should be aligned when the ``min_width``
+  is not reached. Either ``left`` (default), ``center``, or ``right``.
+- ``background``: Specify a background color for py3status modules.
+- ``markup``: Specify how modules should be parsed.
+- ``min_width``: Specify a minimum width of pixels for modules.
+- ``separator``: Specify a separator boolean for modules.
+- ``separator_block_width``: Specify a separator block width for modules.
+
+The following options will work on ``i3-gaps``.
+
+- ``border``: Specify a border color for modules.
+- ``border_bottom``: Specify a border width for modules
+- ``border_left``: Specify a border width for modules.
+- ``border_right``: Specify a border width for modules.
+- ``border_top``: Specify a border width for modules.
+
+The following options will work on ``py3status``.
+
+- ``min_length``: Specify a minimum length of characters for modules.
+- ``position``: Specify how modules should be positioned when the ``min_length``
+  is not reached. Either ``left`` (default), ``center``, or ``right``.
+
+.. code-block:: py3status
+
+   # customize a theme
+   py3status {
+      align = 'left'
+      markup = 'pango'
+      min_width = 20
+      separator = True
+      separator_block_width = 9
+
+      background = '#285577'
+      border = '#4c7899'
+      border_bottom = 1
+      border_left = 1
+      border_right = 1
+      border_top = 1
+
+      min_length = 15
+      position = 'right'
+   }
+
+.. note::
+    New in version 3.16
+
+You can specify the options in module or py3status configuration section.
+
+The following options will work on ``i3bar`` and ``py3status``.
+
+- ``urgent_background``: Specify urgent background color for modules.
+- ``urgent_foreground``: Specify urgent foreground color for modules.
+- ``urgent_border``: Specify urgent border color for modules.
+
+The following options will work on ``i3bar-gaps`` and ``py3status``.
+
+- ``urgent_border_bottom``: Specify urgent border width for modules
+- ``urgent_border_left``: Specify urgent border width for modules.
+- ``urgent_border_right``: Specify urgent border width for modules.
+- ``urgent_border_top``: Specify urgent border width for modules.
+
+You lose urgent functionality too that can be sometimes utilized by
+container modules, e.g., frame and group.
+
+.. code-block:: py3status
+
+   # customize urgent
+   py3status {
+      urgent_background  = 'blue'
+      urgent_foreground = 'white'
+      urgent_border = 'red'
+      urgent_border_bottom = 1
+      urgent_border_left = 1
+      urgent_border_right = 1
+      urgent_border_top = 1
+   }
+
+.. note::
+    New in version 3.20
+
+You can specify the options in module or py3status configuration section.
+
+- ``resources``: Specify a list of 3-tuples, e.g., ``[(option, resource, fallback)]``,
+  to import resources.
+
+.. code-block:: py3status
+
+   # import resources
+   py3status {
+      resources = [
+          ('color_bad', '*color9', 'lightcoral'),
+          ('color_good', '*color10', 'lightgreen'),
+          ('color_degraded', '*color11', 'khaki'),
+          ('nagbar_font', 'py3status.font', 'pango:Ubuntu Mono 12'),
+      ]
+   }
+
+.. code-block:: py3status
+
+   # import 16 colors
+   py3status {
+      resources = [
+          ('color_color0', '*color0', 'black'),
+          ('color_color1', '*color1', 'black'),
+          ('color_color2', '*color2', 'black'),
+          ('color_color3', '*color3', 'black'),
+          ('color_color4', '*color4', 'black'),
+          ('color_color5', '*color5', 'black'),
+          ('color_color6', '*color6', 'black'),
+          ('color_color7', '*color7', 'black'),
+          ('color_color8', '*color8', 'black'),
+          ('color_color9', '*color9', 'black'),
+          ('color_color10', '*color10', 'black'),
+          ('color_color11', '*color11', 'black'),
+          ('color_color12', '*color12', 'black'),
+          ('color_color13', '*color13', 'black'),
+          ('color_color14', '*color14', 'black'),
+          ('color_color15', '*color15', 'black'),
+      ]
+   }
+
+   # apply colors
+   coin_market {
+       thresholds = [(-100, "color9"), (0, "color10")]
+   }
 
 Configuration obfuscation
 -------------------------
@@ -265,7 +410,6 @@ is also possible to use css3 color names eg ``red``
         color_charging = '#FFFF00'
     }
 
-
 Configuring thresholds
 ----------------------
 
@@ -315,6 +459,35 @@ Some modules may allow more than one threshold to be defined.  If all the thresh
                 (30, "bad"),
             ],
         }
+    }
+
+.. note::
+    New in version 3.17
+
+You can specify ``hidden`` color to hide a block.
+
+.. code-block:: py3status
+    :caption: Example
+
+    # hide a block when ``1avg`` (i.e., 12.4) is less than 20 percent
+    format = "[\?color=1avg [\?color=darkgray&show 1min] {1min}]"
+    loadavg {
+       thresholds = [
+            (0, "hidden"),
+           (20, "good"),
+           (40, "degraded"),
+           (60, "#ffa500"),
+           (80, "bad"),
+       ]
+    }
+
+    # hide cpu block when ``cpu_used_percent`` is less than 50 percent
+    # hide mem block when ``mem_used_percent`` is less than 50 percent
+    sysdata {
+        thresholds = [
+            (50, "hidden"),
+            (75, "bad"),
+        ]
     }
 
 Formatter
@@ -692,7 +865,7 @@ Inline Shell Code
 You can use the standard output of a shell script in your configuration with
 the ``shell(...)`` directive. These values are captured at startup and may be
 converted to the needed datatype (only ``str``, ``int``, ``float``, ``bool``
-and ``auto`` (the default) are currently supported).
+and ``auto`` (default) are currently supported).
 
 The shell script executed must return a single line of text on stdout and
 then terminate. If the type is explicitly declared ``bool``, the exit status
@@ -745,9 +918,10 @@ specific subsystem using the ``on_udev_<subsystem>`` configuration parameter
 and an associated action.
 
 Possible actions:
+
 - ``refresh``: immediately refresh the module and keep on updating it as usual
 - ``refresh_and_freeze``: module is ONLY refreshed when said udev subsystem emits
-an event
+  an event
 
 .. code-block:: py3status
     :caption: Example
@@ -761,3 +935,58 @@ an event
     This feature will only activate when ``pyudev`` is installed on the system.
     This is an optional dependency of py3status and is therefore not enforced
     by all package managers.
+
+
+Request Settings
+--------------------------------------------------------------
+
+Handling timeouts
+^^^^^^^^^^^^^^^^^
+
+Timeouts are handled thanks to the global ``request_timeout`` setting.
+
+.. note::
+    New in version 3.16
+
+Request Timeout for URL request based modules can be specified in the
+module configuration. To find out if your module supports that, look for
+``self.py3.request`` in the code. Otherwise, we will use ``10``.
+
+.. code-block:: py3status
+    :caption: Example
+
+    # stop waiting for a response after 10 seconds
+    exchange_rate {
+        request_timeout = 10
+    }
+
+
+Handling retries
+^^^^^^^^^^^^^^^^
+
+Retries are handled thanks to the global ``request_retry_times`` and
+``request_retry_wait`` settings.
+
+.. note::
+    New in version 3.21
+
+Requests failing due to network unavailability or remote server timeouts are
+retried automatically ``request_retry_times`` times (default ``3``) at a
+``request_retry_wait`` (default ``2``) seconds interval.
+
+This allows to be more graceful to i3 startup when network is not up yet or to
+short network disruptions and not display an error on the bar in that case.
+
+To find out if your module supports that, look for ``self.py3.request`` in the
+code.
+
+.. code-block:: py3status
+    :caption: Example
+
+    # try to contact the OWM API 10 times every 5 seconds before displaying
+    # an error on the bar for the module
+    # that is equivalent to 50 seconds of retrying before an error occurs
+    weather_owm {
+        request_retry_times = 10
+        request_retry_wait = 5
+    }

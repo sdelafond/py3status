@@ -6,6 +6,7 @@ from math import ceil
 from numbers import Number
 
 from py3status.composite import Composite
+from py3status.constants import COLOR_NAMES, COLOR_NAMES_EXCLUDED
 
 try:
     from urllib.parse import parse_qsl
@@ -14,6 +15,28 @@ except ImportError:
 
 
 python2 = sys.version_info < (3, 0)
+
+
+def expand_color(color, default=None, passthrough=False, block=None):
+    """
+    Expand various colors to #RRGGBB.
+    """
+    if color:
+        if color[0] == "#":
+            color = color[1:]
+            try:
+                int(color, 16)
+            except ValueError:
+                return block
+            length = len(color)
+            if length in [3, 4]:
+                color = "".join(color[x] * 2 for x in range(length))
+            elif length not in [6, 8]:
+                return block
+            return "#" + color.upper()
+    elif block:
+        return block
+    return COLOR_NAMES.get(color, color if passthrough else default)
 
 
 class Formatter:
@@ -51,6 +74,25 @@ class Formatter:
             tokens = list(re.finditer(self.reg_ex, format_string))
             self.format_string_cache[format_string] = tokens
         return self.format_string_cache[format_string]
+
+    def get_color_names(self, format_string):
+        """
+        Parses the format_string and returns a set of color names.
+        """
+        names = set()
+        # Tokenize the format string and process them
+        for token in self.tokens(format_string):
+            if token.group("command"):
+                name = dict(parse_qsl(token.group("command"))).get("color")
+                if (
+                    not name
+                    or name in COLOR_NAMES_EXCLUDED
+                    or name in COLOR_NAMES
+                    or name[0] == "#"
+                ):
+                    continue
+                names.add(name)
+        return names
 
     def get_placeholders(self, format_string):
         """
@@ -470,7 +512,9 @@ class BlockConfig:
             self._if = Condition(_if)
         self._set_int(commands, "max_length")
         self._set_int(commands, "min_length")
-        self.color = self._check_color(commands.get("color"))
+        self.color = expand_color(
+            commands.get("color"), passthrough=True, block=self.color
+        )
 
         self.not_zero = "not_zero" in commands or self.not_zero
         self.show = "show" in commands or self.show
@@ -486,27 +530,6 @@ class BlockConfig:
                 setattr(self, name, value)
             except ValueError:
                 pass
-
-    def _check_color(self, color):
-        if not color:
-            return self.color
-        # fix any hex colors so they are #RRGGBB
-        if color.startswith("#"):
-            color = color.upper()
-            if len(color) == 4:
-                color = (
-                    "#"
-                    + color[1]
-                    + color[1]
-                    + color[2]
-                    + color[2]
-                    + color[3]
-                    + color[3]
-                )
-            # check color is valid
-            if not self.REGEX_COLOR.match(color):
-                return self.color
-        return color
 
 
 class Block:
@@ -623,6 +646,8 @@ class Block:
                 or getattr(module, threshold_color_name, None)
                 or getattr(module.py3, color_name.upper(), None)
             )
+            if color == "hidden":
+                return False, []
 
         text = u""
         out = []
@@ -630,17 +655,21 @@ class Block:
             output = [output]
 
         # merge as much output as we can.
-        # we need to convert values to unicode for concatination.
+        # we need to convert values to unicode for concatenation.
         if python2:
             conversion = unicode  # noqa
-            convertables = (str, bool, int, float, unicode)  # noqa
+            convertibles = (str, bool, int, float, unicode)  # noqa
         else:
             conversion = str
-            convertables = (str, bool, int, float, bytes)
+            convertibles = (str, bool, int, float, bytes)
 
         first = True
+        last_block = None
         for index, item in enumerate(output):
-            if isinstance(item, convertables) or item is None:
+            is_block = isinstance(item, Block)
+            if not is_block and item:
+                last_block = None
+            if isinstance(item, convertibles) or item is None:
                 text += conversion(item)
                 continue
             elif text:
@@ -656,14 +685,15 @@ class Block:
                 if color:
                     item.composite_update(item, {"color": color}, soft=True)
                 out.extend(item.get_content())
-            elif isinstance(item, Block):
+            elif is_block:
                 # if this is a block then likely it is soft.
                 if not out:
                     continue
                 for x in range(index + 1, len(output)):
                     if output[x] and not isinstance(output[x], Block):
                         valid, _output = item.render(get_params, module, _if=True)
-                        if _output:
+                        if _output and _output != last_block:
+                            last_block = _output
                             out.extend(_output)
                         break
             else:

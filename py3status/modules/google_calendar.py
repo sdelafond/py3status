@@ -104,7 +104,7 @@ Requires:
     https://developers.google.com/google-apps/calendar/quickstart/python
 
     Download the client_secret.json file which contains your client ID and
-    client secret. In your i3status config file, set configuration parameter
+    client secret. In your config file, set configuration parameter
     client_secret to the path to your client_secret.json file.
 
     The first time you run the module, a browser window will open asking you
@@ -149,35 +149,40 @@ from httplib2 import ServerNotFoundError
 from dateutil import parser
 from dateutil.tz import tzlocal
 
-SCOPES = 'https://www.googleapis.com/auth/calendar.readonly'
-APPLICATION_NAME = 'py3status google_calendar module'
+SCOPES = "https://www.googleapis.com/auth/calendar.readonly"
+APPLICATION_NAME = "py3status google_calendar module"
 
 
 class Py3status:
     """
     """
-    auth_token = '~/.config/py3status/google_calendar.auth_token'
+
+    # available configuration parameters
+    auth_token = "~/.config/py3status/google_calendar.auth_token"
     blacklist_events = []
     button_open = 3
     button_refresh = 2
     button_toggle = 1
     cache_timeout = 60
-    client_secret = '~/.config/py3status/google_calendar.client_secret'
+    client_secret = "~/.config/py3status/google_calendar.client_secret"
     events_within_hours = 12
     force_lowercase = False
-    format = '{events}|\?color=event \u2687'
-    format_date = '%a %d-%m'
+    format = "{events}|\?color=event \u2687"
+    format_date = "%a %d-%m"
     format_event = (
-        '[\?color=event {summary}][\?if=is_toggled  ({start_time}'
-        ' - {end_time}, {start_date})|[ ({location})][ {format_timer}]]')
-    format_notification = '{summary} {start_time} - {end_time}'
-    format_separator = ' \| '
-    format_time = '%I:%M %p'
-    format_timer = ('\?color=time ([\?if=days {days}d ][\?if=hours {hours}h ]'
-                    '[\?if=minutes {minutes}m])[\?if=is_current  left]')
+        "[\?color=event {summary}][\?if=is_toggled  ({start_time}"
+        " - {end_time}, {start_date})|[ ({location})][ {format_timer}]]"
+    )
+    format_notification = "{summary} {start_time} - {end_time}"
+    format_separator = " \| "
+    format_time = "%I:%M %p"
+    format_timer = (
+        "\?color=time ([\?if=days {days}d ][\?if=hours {hours}h ]"
+        "[\?if=minutes {minutes}m])[\?if=is_current  left]"
+    )
     ignore_all_day_events = False
     num_events = 3
-    response = ['accepted']
+    response = ["accepted"]
     thresholds = []
     time_to_max = 180
     warn_threshold = 0
@@ -218,20 +223,19 @@ class Py3status:
 
         if not credentials or credentials.invalid:
             try:
-                flow = client.flow_from_clientsecrets(self.client_secret,
-                                                      SCOPES)
+                flow = client.flow_from_clientsecrets(self.client_secret, SCOPES)
                 flow.user_agent = APPLICATION_NAME
                 if flags:
                     credentials = tools.run_flow(flow, store, flags)
                 else:  # Needed only for compatibility with Python 2.6
                     credentials = tools.run(flow, store)
             except clientsecrets.InvalidClientSecretsError:
-                raise Exception('missing client_secret')
+                raise Exception("missing client_secret")
             """
             Have to restart i3 after getting credentials to prevent bad output.
             This only has to be done once on the first run of the module.
             """
-            self.py3.command_run('i3-msg restart')
+            self.py3.command_run("{} restart".format(self.py3.get_wm_msg()))
 
         return credentials
 
@@ -244,7 +248,7 @@ class Py3status:
         """
         try:
             http = self.credentials.authorize(httplib2.Http())
-            self.service = discovery.build('calendar', 'v3', http=http)
+            self.service = discovery.build("calendar", "v3", http=http)
             return True
         except ServerNotFoundError:
             return False
@@ -261,24 +265,28 @@ class Py3status:
         events = []
 
         try:
-            eventsResult = self.service.events().list(
-                calendarId='primary',
-                timeMax=time_max.isoformat() + 'Z',  # 'Z' indicates UTC time
-                timeMin=time_min.isoformat() + 'Z',  # 'Z' indicates UTC time
-                singleEvents=True,
-                orderBy='startTime').execute(num_retries=5)
+            eventsResult = (
+                self.service.events()
+                .list(
+                    calendarId="primary",
+                    timeMax=time_max.isoformat() + "Z",  # 'Z' indicates UTC time
+                    timeMin=time_min.isoformat() + "Z",  # 'Z' indicates UTC time
+                    singleEvents=True,
+                    orderBy="startTime",
+                )
+                .execute(num_retries=5)
+            )
         except Exception:
             return self.events or events
         else:
-            for event in eventsResult.get('items', []):
+            for event in eventsResult.get("items", []):
                 # filter out events that we did not accept (default)
                 # unless we organized them with no attendees
-                i_organized = event.get('organizer', {}).get('self', False)
-                has_attendees = event.get('attendees', [])
-                for attendee in event.get('attendees', []):
-                    if attendee.get('self') is True:
-                        if attendee[
-                                'responseStatus'] in self.response:
+                i_organized = event.get("organizer", {}).get("self", False)
+                has_attendees = event.get("attendees", [])
+                for attendee in event.get("attendees", []):
+                    if attendee.get("self") is True:
+                        if attendee["responseStatus"] in self.response:
                             break
                 else:
                     # we did not organize the event or we did not accept it
@@ -286,35 +294,35 @@ class Py3status:
                         continue
 
                 # strip and lower case output if needed
-                for key in ['description', 'location', 'summary']:
-                    event[key] = event.get(key, '').strip()
+                for key in ["description", "location", "summary"]:
+                    event[key] = event.get(key, "").strip()
                     if self.force_lowercase is True:
                         event[key] = event[key].lower()
 
                 # ignore all day events if configured
-                if event['start'].get('date') is not None:
+                if event["start"].get("date") is not None:
                     if self.ignore_all_day_events:
                         continue
 
                 # filter out blacklisted event names
-                if event['summary'] is not None:
-                    if event['summary'].lower() \
-                            in map(lambda e: e.lower(), self.blacklist_events):
+                if event["summary"] is not None:
+                    if event["summary"].lower() in map(
+                        lambda e: e.lower(), self.blacklist_events
+                    ):
                         continue
 
                 events.append(event)
 
-        return events[:self.num_events]
+        return events[: self.num_events]
 
     def _check_warn_threshold(self, time_to, event_dict):
         """
         Checks if the time until an event starts is less than or equal to the
         warn_threshold. If True, issue a warning with self.py3.notify_user.
         """
-        if time_to['total_minutes'] <= self.warn_threshold:
-            warn_message = self.py3.safe_format(self.format_notification,
-                                                event_dict)
-            self.py3.notify_user(warn_message, 'warning', self.warn_timeout)
+        if time_to["total_minutes"] <= self.warn_threshold:
+            warn_message = self.py3.safe_format(self.format_notification, event_dict)
+            self.py3.notify_user(warn_message, "warning", self.warn_timeout)
 
     def _gstr_to_date(self, date_str):
         """ Returns a dateime object from calendar date string."""
@@ -342,36 +350,37 @@ class Py3status:
         total_minutes = int((diff.seconds / 60) + (days * 24 * 60)) + 1
 
         return {
-            'days': days,
-            'hours': hours,
-            'minutes': minutes,
-            'total_minutes': total_minutes
+            "days": days,
+            "hours": hours,
+            "minutes": minutes,
+            "total_minutes": total_minutes,
         }
 
     def _format_timedelta(self, index, time_delta, is_current):
         """
-        Formats the dict time_to containg days/hours/minutes until an
+        Formats the dict time_to containing days/hours/minutes until an
         event starts into a composite according to time_to_formatted.
 
         Returns: A formatted composite.
         """
-        time_delta_formatted = ''
+        time_delta_formatted = ""
 
-        if time_delta['total_minutes'] <= self.time_to_max:
+        if time_delta["total_minutes"] <= self.time_to_max:
             time_delta_formatted = self.py3.safe_format(
-                self.format_timer, {
-                    'days': time_delta['days'],
-                    'hours': time_delta['hours'],
-                    'minutes': time_delta['minutes'],
-                    'is_current': is_current,
-                }
+                self.format_timer,
+                {
+                    "days": time_delta["days"],
+                    "hours": time_delta["hours"],
+                    "minutes": time_delta["minutes"],
+                    "is_current": is_current,
+                },
             )
 
         return time_delta_formatted
 
     def _build_response(self):
         """
-        Builds the composite reponse to be output by the module by looping
+        Builds the composite response to be output by the module by looping
         through all events and formatting the necessary strings.
 
         Returns: A composite containing the individual response for each event.
@@ -380,74 +389,71 @@ class Py3status:
         self.event_urls = []
 
         for index, event in enumerate(self.events):
-            self.py3.threshold_get_color(index + 1, 'event')
-            self.py3.threshold_get_color(index + 1, 'time')
+            self.py3.threshold_get_color(index + 1, "event")
+            self.py3.threshold_get_color(index + 1, "time")
 
             event_dict = {}
 
-            event_dict['summary'] = event.get('summary')
-            event_dict['location'] = event.get('location')
-            event_dict['description'] = event.get('description')
-            self.event_urls.append(event['htmlLink'])
+            event_dict["summary"] = event.get("summary")
+            event_dict["location"] = event.get("location")
+            event_dict["description"] = event.get("description")
+            self.event_urls.append(event["htmlLink"])
 
-            if event['start'].get('date') is not None:
-                start_dt = self._gstr_to_date(event['start'].get('date'))
-                end_dt = self._gstr_to_date(event['end'].get('date'))
+            if event["start"].get("date") is not None:
+                start_dt = self._gstr_to_date(event["start"].get("date"))
+                end_dt = self._gstr_to_date(event["end"].get("date"))
             else:
-                start_dt = self._gstr_to_datetime(
-                    event['start'].get('dateTime'))
-                end_dt = self._gstr_to_datetime(event['end'].get('dateTime'))
+                start_dt = self._gstr_to_datetime(event["start"].get("dateTime"))
+                end_dt = self._gstr_to_datetime(event["end"].get("dateTime"))
 
             if end_dt < datetime.datetime.now(tzlocal()):
                 continue
 
-            event_dict['start_time'] = self._datetime_to_str(start_dt,
-                                                             self.format_time)
-            event_dict['end_time'] = self._datetime_to_str(end_dt,
-                                                           self.format_time)
+            event_dict["start_time"] = self._datetime_to_str(start_dt, self.format_time)
+            event_dict["end_time"] = self._datetime_to_str(end_dt, self.format_time)
 
-            event_dict['start_date'] = self._datetime_to_str(start_dt,
-                                                             self.format_date)
-            event_dict['end_date'] = self._datetime_to_str(end_dt,
-                                                           self.format_date)
+            event_dict["start_date"] = self._datetime_to_str(start_dt, self.format_date)
+            event_dict["end_date"] = self._datetime_to_str(end_dt, self.format_date)
 
             time_delta = self._delta_time(start_dt)
-            if time_delta['days'] < 0:
+            if time_delta["days"] < 0:
                 time_delta = self._delta_time(end_dt)
                 is_current = True
             else:
                 is_current = False
 
-            event_dict['format_timer'] = self._format_timedelta(
-                index, time_delta, is_current)
+            event_dict["format_timer"] = self._format_timedelta(
+                index, time_delta, is_current
+            )
 
             if self.warn_threshold > 0:
                 self._check_warn_threshold(time_delta, event_dict)
 
             event_formatted = self.py3.safe_format(
-                self.format_event, {
-                    'is_toggled': self.button_states[index],
-                    'summary': event_dict['summary'],
-                    'location': event_dict['location'],
-                    'description': event_dict['description'],
-                    'start_time': event_dict['start_time'],
-                    'end_time': event_dict['end_time'],
-                    'start_date': event_dict['start_date'],
-                    'end_date': event_dict['end_date'],
-                    'format_timer': event_dict['format_timer'],
-                }
+                self.format_event,
+                {
+                    "is_toggled": self.button_states[index],
+                    "summary": event_dict["summary"],
+                    "location": event_dict["location"],
+                    "description": event_dict["description"],
+                    "start_time": event_dict["start_time"],
+                    "end_time": event_dict["end_time"],
+                    "start_date": event_dict["start_date"],
+                    "end_date": event_dict["end_date"],
+                    "format_timer": event_dict["format_timer"],
+                },
             )
 
-            self.py3.composite_update(event_formatted, {'index': index})
+            self.py3.composite_update(event_formatted, {"index": index})
             responses.append(event_formatted)
 
             self.no_update = False
 
         format_separator = self.py3.safe_format(self.format_separator)
-        self.py3.composite_update(format_separator, {'index': 'sep'})
+        self.py3.composite_update(format_separator, {"index": "sep"})
         responses = self.py3.composite_join(format_separator, responses)
 
-        return {'events': responses}
+        return {"events": responses}
 
     def google_calendar(self):
         """
@@ -472,15 +478,15 @@ class Py3status:
             cached_until = self.cache_timeout
 
         return {
-            'cached_until': self.py3.time_in(cached_until),
-            'composite': self.py3.safe_format(self.format, composite)
+            "cached_until": self.py3.time_in(cached_until),
+            "composite": self.py3.safe_format(self.format, composite),
         }
 
     def on_click(self, event):
         if self.is_authorized and self.events is not None:
             """
             If button_refresh is clicked, we allow the events to be updated
-            if the last event update occured at least 1 second ago. This
+            if the last event update occurred at least 1 second ago. This
             prevents a bug that can crash py3status since refreshing the
             module too fast results in incomplete event information being
             fetched as _get_events() is called repeatedly.
@@ -488,10 +494,10 @@ class Py3status:
             Otherwise, we disable event updates.
             """
             self.no_update = True
-            button = event['button']
-            button_index = event['index']
+            button = event["button"]
+            button_index = event["index"]
 
-            if button_index == 'sep':
+            if button_index == "sep":
                 self.py3.prevent_refresh()
             elif button == self.button_refresh:
                 now = datetime.datetime.now()
@@ -499,11 +505,12 @@ class Py3status:
                 if diff > 1:
                     self.no_update = False
             elif button == self.button_toggle:
-                self.button_states[button_index] = \
-                    not self.button_states[button_index]
+                self.button_states[button_index] = not self.button_states[button_index]
             elif button == self.button_open:
-                self.py3.command_run('xdg-open ' + self.event_urls[
-                    button_index])
+                if self.event_urls:
+                    self.py3.command_run(
+                        "xdg-open {}".format(self.event_urls[button_index])
+                    )
                 self.py3.prevent_refresh()
             else:
                 self.py3.prevent_refresh()
@@ -514,4 +521,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

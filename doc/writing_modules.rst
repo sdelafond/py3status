@@ -7,10 +7,64 @@ Writing custom py3status modules
 
 Writing custom modules for py3status is easy. This guide will teach you how.
 
-Let's start by looking at a simple example.
+Importing custom modules
+------------------------
+
+py3status will try to find custom modules in the following locations:
+
+- ``~/.config/py3status/modules``
+- ``~/.config/i3status/py3status``
+- ``~/.config/i3/py3status``
+- ``~/.i3/py3status``
+
+which if you are used to XDG_CONFIG paths relates to:
+
+- ``XDG_CONFIG_HOME/py3status/modules``
+- ``XDG_CONFIG_HOME/i3status/py3status``
+- ``XDG_CONFIG_HOME/i3/py3status``
+- ``~/.i3/py3status``
+
+You can also specify the modules location using ``py3status -i <path to custom
+modules directory>`` in your i3 configuration file.
+
+Publishing custom modules on PyPI
+---------------------------------
+
+.. note::
+    Available since py3status version 3.20.
+
+You can share your custom modules and make them available for py3status users even
+if they are not directly part of the py3status main project!
+
+All you have to do is to package your module and publish it to PyPI.
+
+py3status will discover custom modules if they are installed in the same host
+interpreter and if an entry_point in your package ``setup.py`` is defined::
+
+    setup(
+        entry_points={"py3status": ["module = package_name.py3status_module_name"]},
+    )
+
+The awesome `pewpew` module can be taken as an example on how to do it easily:
+
+- Module repository: https://github.com/obestwalter/py3status-pewpew
+- Example setup.py: https://github.com/obestwalter/py3status-pewpew/blob/master/setup.py
+
+We will gladly add ``extra_requires`` pointing to your modules so that users can require
+them while installing py3status. Just open an issue to request this or propose a PR.
+
+If you have installed py3status in a virtualenv (maybe because your custom module
+has dependencies that need to be available) you can also create an installable
+package from your module and publish it on PyPI.
+
+.. note::
+    To clearly identify your py3status package and for others to discover it easily
+    it is recommended to name the PyPI package ``py3status-<your module name>``.
 
 Example 1: The basics - Hello World!
 ------------------------------------
+
+Now let's start by looking at a simple example.
 
 Here we start with the most basic module that just outputs a static string to
 the status bar.
@@ -295,7 +349,7 @@ Example 5: Using color constants
             return {
                 'full_text': full_text,
                 'color': color,
-                'cache_until': self.py3.CACHE_FOREVER
+                'cached_until': self.py3.CACHE_FOREVER
             }
 
         def on_click(self, event):
@@ -808,6 +862,7 @@ Such modules can then be tested independently by running
 ``python /path/to/module.py``.
 
 .. code-block:: bash
+
     $ python loadavg.py
     [{'full_text': 'Loadavg ', 'separator': False,
     'separator_block_width': 0, 'cached_until': 1538755796.0},
@@ -818,6 +873,7 @@ We also can produce an output similar to i3bar output in terminal with
 ``python /path/to/module.py --term``.
 
 .. code-block:: bash
+
     $ python loadavg.py --term
     Loadavg 1.41 1.61 1.82
     Loadavg 1.41 1.61 1.82

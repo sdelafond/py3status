@@ -14,11 +14,10 @@ from time import time
 from uuid import uuid4
 
 from py3status import exceptions
-from py3status.constants import COLOR_NAMES
-from py3status.formatter import Formatter, Composite
+from py3status.formatter import Formatter, Composite, expand_color
 from py3status.request import HttpResponse
 from py3status.storage import Storage
-from py3status.util import Gradiants
+from py3status.util import Gradients
 from py3status.version import version
 
 
@@ -80,7 +79,7 @@ class Py3:
 
     CACHE_FOREVER = PY3_CACHE_FOREVER
     """
-    Special constant that when returned for ``cache_until`` will cause the
+    Special constant that when returned for ``cached_until`` will cause the
     module to not update unless externally triggered.
     """
 
@@ -93,7 +92,7 @@ class Py3:
 
     # Shared by all Py3 Instances
     _formatter = None
-    _gradients = Gradiants()
+    _gradients = Gradients()
     _none_color = NoneColor()
     _storage = Storage()
 
@@ -111,6 +110,7 @@ class Py3:
         self._english_env = dict(os.environ)
         self._english_env["LC_ALL"] = "C"
         self._english_env["LANGUAGE"] = "C"
+        self._format_color_names = {}
         self._format_placeholders = {}
         self._format_placeholders_cache = {}
         self._is_python_2 = sys.version_info < (3, 0)
@@ -153,9 +153,17 @@ class Py3:
             # that was explicitly set to None as a True value.  Ones that are
             # not set should be treated as None
             if name.startswith("color_"):
-                if hasattr(param, "none_setting"):
+                _name = name[6:].lower()
+                # use color "hidden" to hide blocks
+                if _name == "hidden":
+                    param = "hidden"
+                # TODO: removing this statement does not fail "test_color_10()" but would fail
+                # easily in the bar. the test is there to raise awareness about this.
+                # TODO: "test_color_11()" shows how the tests can be incorrect as it does not print
+                # everything correctly (i.e. orange vs ORaNgE) due to non composite/formatter code.
+                elif hasattr(param, "none_setting"):
                     # see if named color and use if it is
-                    param = COLOR_NAMES.get(name[6:].lower())
+                    param = expand_color(_name)
                 elif param is None:
                     param = self._none_color
             # if a non-color parameter and was not set then set to default
@@ -165,25 +173,10 @@ class Py3:
         return self._config_setting[name]
 
     def _get_color(self, color):
-        if not color:
-            return
-        # fix any hex colors so they are #RRGGBB
-        if color.startswith("#"):
-            color = color.upper()
-            if len(color) == 4:
-                color = (
-                    "#"
-                    + color[1]
-                    + color[1]
-                    + color[2]
-                    + color[2]
-                    + color[3]
-                    + color[3]
-                )
-            return color
-
-        name = "color_%s" % color
-        return self._get_config_setting(name)
+        if color:
+            if color[0] == "#":
+                return expand_color(color)
+            return self._get_config_setting("color_" + color)
 
     def _thresholds_init(self):
         """
@@ -371,6 +364,8 @@ class Py3:
                 si = len(unit) > 1 and unit[1] != "i"
                 if si:
                     post = post[1:]
+                    if unit[1] == "b":
+                        value *= 8
                 auto = False
             else:
                 index = 0
@@ -445,6 +440,12 @@ class Py3:
         """
         return self._is_python_2
 
+    def is_gevent(self):
+        """
+        Checks if gevent monkey patching is enabled or not.
+        """
+        return self._py3_wrapper.is_gevent
+
     def is_my_event(self, event):
         """
         Checks if an event triggered belongs to the module receiving it.  This
@@ -494,6 +495,15 @@ class Py3:
             module_info = self._get_module_info(module_name)
             if module_info:
                 module_info["module"].force_update()
+
+    def get_wm_msg(self):
+        """
+        Return the control program of the current window manager.
+
+        On i3, will return "i3-msg"
+        On sway, will return "swaymsg"
+        """
+        return self._py3_wrapper.config["wm"]["msg"]
 
     def get_output(self, module_name):
         """
@@ -632,9 +642,14 @@ class Py3:
         # Unless the requested update is in less than a second
         if sync_to is None:
             if seconds and seconds < 1:
-                sync_to = 0
+                if 1 % seconds == 0:
+                    sync_to = seconds
+                else:
+                    sync_to = 0
             else:
                 sync_to = 1
+                if seconds:
+                    seconds -= 0.1
 
         requested = time() + seconds - offset
 
@@ -692,35 +707,53 @@ class Py3:
         self._format_placeholders_cache[format_string][key] = False
         return False
 
-    def get_color_names_list(self, format_strings):
+    def get_color_names_list(self, format_string, matches=None):
         """
         Returns a list of color names in ``format_string``.
 
-        :param format_strings: Accepts a format string or a list of format strings.
+        :param format_string: Accepts a format string.
+        :param matches: Filter results with a string or a list of strings.
+
+        If ``matches`` is provided then it is used to filter the result
+        using fnmatch so the following patterns can be used:
+
+        .. code-block:: none
+
+            * 	    matches everything
+            ? 	    matches any single character
+            [seq] 	matches any character in seq
+            [!seq] 	matches any character not in seq
         """
         if not getattr(self._py3status_module, "thresholds", None):
             return []
-        if isinstance(format_strings, basestring):
-            format_strings = [format_strings]
-        names = set()
-        for string in format_strings:
-            for color in string.replace("&", " ").split("color=")[1::1]:
-                color = color.split()[0]
-                if "#" in color:
-                    continue
-                if color in ["good", "bad", "degraded", "None", "threshold"]:
-                    continue
-                if color in COLOR_NAMES:
-                    continue
-                names.add(color)
-        return list(names)
+        elif not format_string:
+            return []
 
-    def get_placeholders_list(self, format_string, match=None):
+        if format_string not in self._format_color_names:
+            names = self._formatter.get_color_names(format_string)
+            self._format_color_names[format_string] = names
+        else:
+            names = self._format_color_names[format_string]
+
+        if not matches:
+            return list(names)
+        elif isinstance(matches, basestring):
+            matches = [matches]
+        # filter matches
+        found = set()
+        for match in matches:
+            for name in names:
+                if fnmatch(name, match):
+                    found.add(name)
+        return list(found)
+
+    def get_placeholders_list(self, format_string, matches=None):
         """
         Returns a list of placeholders in ``format_string``.
 
-        If ``match`` is provided then it is used to filter the result using
-        fnmatch so the following patterns can be used:
+        If ``matches`` is provided then it is used to filter the result
+        using fnmatch so the following patterns can be used:
+
 
         .. code-block:: none
 
@@ -739,14 +772,17 @@ class Py3:
         else:
             placeholders = self._format_placeholders[format_string]
 
-        if not match:
+        if not matches:
             return list(placeholders)
+        elif isinstance(matches, basestring):
+            matches = [matches]
         # filter matches
-        found = []
-        for placeholder in placeholders:
-            if fnmatch(placeholder, match):
-                found.append(placeholder)
-        return found
+        found = set()
+        for match in matches:
+            for placeholder in placeholders:
+                if fnmatch(placeholder, match):
+                    found.add(placeholder)
+        return list(found)
 
     def get_placeholder_formats_list(self, format_string):
         """
@@ -1092,13 +1128,14 @@ class Py3:
         Plays sound_file if possible.
         """
         self.stop_sound()
-        cmd = self.check_commands(["ffplay", "paplay", "play"])
-        if cmd:
-            if cmd == "ffplay":
-                cmd = "ffplay -autoexit -nodisp -loglevel 0"
-            sound_file = os.path.expanduser(sound_file)
-            c = shlex.split("{} {}".format(cmd, sound_file))
-            self._audio = Popen(c)
+        if sound_file:
+            cmd = self.check_commands(["ffplay", "paplay", "play"])
+            if cmd:
+                if cmd == "ffplay":
+                    cmd = "ffplay -autoexit -nodisp -loglevel 0"
+                sound_file = os.path.expanduser(sound_file)
+                c = shlex.split("{} {}".format(cmd, sound_file))
+                self._audio = Popen(c)
 
     def stop_sound(self):
         """
@@ -1197,7 +1234,7 @@ class Py3:
                         else:
                             break
             except TypeError:
-                pass
+                color = None
 
         # save color so it can be accessed via safe_format()
         if name:
@@ -1217,6 +1254,8 @@ class Py3:
         timeout=None,
         auth=None,
         cookiejar=None,
+        retry_times=None,
+        retry_wait=None,
     ):
         """
         Make a request to a url and retrieve the results.
@@ -1233,6 +1272,8 @@ class Py3:
         :param timeout: timeout for the request in seconds
         :param auth: authentication info as tuple `(username, password)`
         :param cookiejar: an object of a CookieJar subclass
+        :param retry_times: how many times to retry the request
+        :param retry_wait: how long to wait between retries in seconds
 
         :returns: HttpResponse
         """
@@ -1249,15 +1290,39 @@ class Py3:
         if headers is None:
             headers = {}
 
+        if timeout is None:
+            timeout = getattr(self._py3status_module, "request_timeout", 10)
+
+        if retry_times is None:
+            retry_times = getattr(self._py3status_module, "request_retry_times", 3)
+
+        if retry_wait is None:
+            retry_wait = getattr(self._py3status_module, "request_retry_wait", 2)
+
         if "User-Agent" not in headers:
             headers["User-Agent"] = "py3status/{} {}".format(version, self._uid)
 
-        return HttpResponse(
-            url,
-            params=params,
-            data=data,
-            headers=headers,
-            timeout=timeout,
-            auth=auth,
-            cookiejar=cookiejar,
-        )
+        def get_http_response():
+            return HttpResponse(
+                url,
+                params=params,
+                data=data,
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
+                cookiejar=cookiejar,
+            )
+
+        for n in range(1, retry_times):
+            try:
+                return get_http_response()
+            except (self.RequestTimeout, self.RequestURLError):
+                if self.is_gevent():
+                    from gevent import sleep
+                else:
+                    from time import sleep
+                self.log("HTTP request retry {}/{}".format(n, retry_times))
+                sleep(retry_wait)
+        self.log("HTTP request retry {}/{}".format(retry_times, retry_times))
+        sleep(retry_wait)
+        return get_http_response()

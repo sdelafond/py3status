@@ -15,6 +15,8 @@ Configuration parameters:
         (default "↑ {up} ↓ {down}")
     format_value: A string describing how to format the transfer rates
         (default "[\?min_length=12 {rate:.1f} {unit}]")
+    hide_socket_errors: Hide errors connecting to Tor control socket
+        (default False)
     rate_unit: The unit to use for the transfer rates
         (default "B/s")
     si_units: A boolean value selecting whether or not to use SI units
@@ -29,10 +31,9 @@ format_value placeholders:
     {unit} The current transfer-rate's unit
 
 Requires:
-    stem: python module from pypi https://pypi.python.org/pypi/stem
+    stem: python controller library for tor https://pypi.org/project/stem
 
-Example:
-
+Examples:
 ```
 tor_rate {
     cache_timeout = 10
@@ -41,8 +42,6 @@ tor_rate {
     control_password = "TertiaryAdjunctOfUnimatrix01"
     si_units = True
 }
-
-order += "tor_rate"
 ```
 
 @author Felix Morgner <felix.morgner@gmail.com>
@@ -56,22 +55,24 @@ from stem import ProtocolError, SocketError
 from stem.connection import AuthenticationFailure
 from stem.control import Controller, EventType
 
-ERROR_AUTHENTICATION = 'Error: Failed to authenticate with Tor daemon!'
-ERROR_CONNECTION = 'Error: Failed to establish control connection!'
-ERROR_PROTOCOL = 'Error: Failed to register event handler!'
+ERROR_AUTHENTICATION = "Error: Failed to authenticate with Tor daemon!"
+ERROR_CONNECTION = "Error: Failed to establish control connection!"
+ERROR_PROTOCOL = "Error: Failed to register event handler!"
 
 
 class Py3status:
     """
     """
+
     # available configuration parameters
     cache_timeout = 2
-    control_address = '127.0.0.1'
+    control_address = "127.0.0.1"
     control_password = None
     control_port = 9051
-    format = u'↑ {up} ↓ {down}'
-    format_value = '[\?min_length=12 {rate:.1f} {unit}]'
-    rate_unit = 'B/s'
+    format = u"↑ {up} ↓ {down}"
+    format_value = "[\?min_length=12 {rate:.1f} {unit}]"
+    hide_socket_errors = False
+    rate_unit = "B/s"
     si_units = False
 
     def post_config_hook(self):
@@ -81,14 +82,15 @@ class Py3status:
         self._up = 0
 
     def tor_rate(self, outputs, config):
-        text = ''
+        text = ""
         if not self._handler_active and not self._auth_failure:
             try:
                 self._register_event_handler()
             except ProtocolError:
                 text = ERROR_PROTOCOL
             except SocketError:
-                text = ERROR_CONNECTION
+                if not self.hide_socket_errors:
+                    text = ERROR_CONNECTION
             except AuthenticationFailure:
                 text = ERROR_AUTHENTICATION
                 self._auth_failure = True
@@ -97,27 +99,22 @@ class Py3status:
         else:
             text = self.py3.safe_format(self.format, self._get_rates())
 
-        return {
-            'cached_until': self.py3.time_in(self.cache_timeout),
-            'full_text': text,
-        }
+        return {"cached_until": self.py3.time_in(self.cache_timeout), "full_text": text}
 
     def _get_rates(self):
-        up, up_unit = self.py3.format_units(self._up,
-                                            unit=self.rate_unit,
-                                            si=self.si_units)
-        down, down_unit = self.py3.format_units(self._down,
-                                                unit=self.rate_unit,
-                                                si=self.si_units)
+        up, up_unit = self.py3.format_units(
+            self._up, unit=self.rate_unit, si=self.si_units
+        )
+        down, down_unit = self.py3.format_units(
+            self._down, unit=self.rate_unit, si=self.si_units
+        )
         return {
-            'up': self.py3.safe_format(self.format_value, {
-                'rate': up,
-                'unit': up_unit,
-            }),
-            'down': self.py3.safe_format(self.format_value, {
-                'rate': down,
-                'unit': down_unit,
-            }),
+            "up": self.py3.safe_format(
+                self.format_value, {"rate": up, "unit": up_unit}
+            ),
+            "down": self.py3.safe_format(
+                self.format_value, {"rate": down, "unit": down_unit}
+            ),
         }
 
     def _handle_event(self, event):
@@ -125,16 +122,17 @@ class Py3status:
         self._up = event.written
 
     def _register_event_handler(self):
-        self._control = Controller.from_port(address=self.control_address,
-                                             port=self.control_port)
+        self._control = Controller.from_port(
+            address=self.control_address, port=self.control_port
+        )
         if self.control_password:
             self._control.authenticate(password=self.control_password)
-        self._control.add_event_listener(lambda e: self._handle_event(e),
-                                         EventType.BW)
+        self._control.add_event_listener(lambda e: self._handle_event(e), EventType.BW)
         self._handler_active = True
 
 
 if __name__ == "__main__":
     from py3status.module_test import module_test
-    config = {'control_password': 'SevenOfNine', }
+
+    config = {"control_password": "SevenOfNine"}
     module_test(Py3status, config)

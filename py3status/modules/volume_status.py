@@ -2,12 +2,9 @@
 """
 Volume control.
 
-Expands on the standard i3status volume module by adding color
-and percentage threshold settings.
-Volume up/down and Toggle mute via mouse clicks can be easily added see
-example.
-
 Configuration parameters:
+    blocks: a string, where each character represents a volume level
+            (default "_▁▂▃▄▅▆▇█")
     button_down: button to decrease volume (default 5)
     button_mute: button to toggle mute (default 1)
     button_up: button to increase volume (default 4)
@@ -36,11 +33,23 @@ Configuration parameters:
         (default 5)
 
 Format placeholders:
+    {icon} Character representing the volume level,
+            as defined by the 'blocks'
     {percentage} Percentage volume
 
 Color options:
     color_muted: Volume is muted, if not supplied color_bad is used
         if set to `None` then the threshold color will be used.
+
+Requires:
+    alsa-utils: an alternative implementation of linux sound support
+    pamixer: pulseaudio command-line mixer like amixer
+
+Notes:
+    If you are changing volume state by external scripts etc and
+    want to refresh the module quicker than the i3status interval,
+    send a USR1 signal to py3status in the keybinding.
+    Example: killall -s USR1 py3status
 
 Examples:
 ```
@@ -61,16 +70,6 @@ volume_status {
 }
 ```
 
-Requires:
-    alsa-utils: alsa backend (tested with alsa-utils 1.0.29-1)
-    pamixer: pulseaudio backend
-
-NOTE:
-    If you are changing volume state by external scripts etc and
-    want to refresh the module quicker than the i3status interval,
-    send a USR1 signal to py3status in the keybinding.
-    Example: killall -s USR1 py3status
-
 @author <Jan T> <jans.tuomi@gmail.com>
 @license BSD
 
@@ -82,19 +81,21 @@ mute
 """
 
 import re
+import math
 from py3status.exceptions import CommandError
 
-STRING_ERROR = 'invalid command `%s`'
-STRING_NOT_AVAILABLE = 'no available binary'
-COMMAND_NOT_INSTALLED = 'command `%s` not installed'
+STRING_ERROR = "invalid command `%s`"
+STRING_NOT_AVAILABLE = "no available binary"
+COMMAND_NOT_INSTALLED = "command `%s` not installed"
 
 
-class AudioBackend():
+class Audio:
     def __init__(self, parent):
         self.card = parent.card
         self.channel = parent.channel
         self.device = parent.device
         self.is_input = parent.is_input
+        self.max_volume = parent.max_volume
         self.parent = parent
         self.setup(parent)
 
@@ -108,107 +109,121 @@ class AudioBackend():
         return self.parent.py3.command_output(cmd)
 
 
-class AmixerBackend(AudioBackend):
+class Amixer(Audio):
     def setup(self, parent):
         if self.card is None:
-            self.card = '0'
+            self.card = "0"
         if self.channel is None:
-            self.channel = 'Capture' if self.is_input else 'Master'
+            self.channel = "Capture" if self.is_input else "Master"
         if self.device is None:
-            self.device = 'default'
-        self.cmd = ['amixer', '-q', '-D', self.device,
-                    '-c', self.card, 'sset', self.channel]
-        self.get_volume_cmd = ['amixer', '-D', self.device,
-                               '-c', self.card, 'sget', self.channel]
+            self.device = "default"
+        self.cmd = [
+            "amixer",
+            "-q",
+            "-D",
+            self.device,
+            "-c",
+            self.card,
+            "sset",
+            self.channel,
+        ]
+        self.get_volume_cmd = [
+            "amixer",
+            "-M",
+            "-D",
+            self.device,
+            "-c",
+            self.card,
+            "sget",
+            self.channel,
+        ]
 
     def get_volume(self):
         output = self.command_output(self.get_volume_cmd)
 
         # find percentage and status
-        p = re.compile(r'\[(\d{1,3})%\].*\[(\w{2,3})\]')
+        p = re.compile(r"\[(\d{1,3})%\].*\[(\w{2,3})\]")
         perc, muted = p.search(output).groups()
 
         # muted should be 'on' or 'off'
-        if muted in ['on', 'off']:
-            muted = (muted == 'off')
+        if muted in ["on", "off"]:
+            muted = muted == "off"
         else:
             muted = False
 
         return perc, muted
 
     def volume_up(self, delta):
-        self.run_cmd(self.cmd + ['{}%+'.format(delta)])
+        self.run_cmd(self.cmd + ["{}%+".format(delta)])
 
     def volume_down(self, delta):
-        self.run_cmd(self.cmd + ['{}%-'.format(delta)])
+        self.run_cmd(self.cmd + ["{}%-".format(delta)])
 
     def toggle_mute(self):
-        self.run_cmd(self.cmd + ['toggle'])
+        self.run_cmd(self.cmd + ["toggle"])
 
 
-class PamixerBackend(AudioBackend):
+class Pamixer(Audio):
     def setup(self, parent):
-        if self.device is None:
-            self.device = "0"
-        # Ignore channel
-        self.channel = None
-        is_input = '--source' if self.is_input else '--sink'
-        self.cmd = ['pamixer', '--allow-boost', is_input, self.device]
-        self.max_volume = parent.max_volume
+        is_input = "--source" if self.is_input else "--sink"
+        self.cmd = ["pamixer", "--allow-boost", is_input, self.device or "0"]
 
     def get_volume(self):
         try:
-            perc = self.command_output(self.cmd + ["--get-volume"])
+            line = self.command_output(self.cmd + ["--get-mute", "--get-volume"])
         except CommandError as ce:
             # pamixer throws error on zero percent. see #1135
-            perc = ce.output
-
-        perc = perc.strip()
-        muted = (self.run_cmd(self.cmd + ["--get-mute"]) == 0)
+            line = ce.output
+        try:
+            muted, perc = line.split()
+            muted = muted == "true"
+        except ValueError:
+            muted, perc = None, None
         return perc, muted
 
     def volume_up(self, delta):
         perc, muted = self.get_volume()
         if int(perc) + delta >= self.max_volume:
-            options = ['--set-volume', str(self.max_volume)]
+            options = ["--set-volume", str(self.max_volume)]
         else:
-            options = ['-i', str(delta)]
+            options = ["--increase", str(delta)]
         self.run_cmd(self.cmd + options)
 
     def volume_down(self, delta):
-        self.run_cmd(self.cmd + ["-d", str(delta)])
+        self.run_cmd(self.cmd + ["--decrease", str(delta)])
 
     def toggle_mute(self):
-        self.run_cmd(self.cmd + ["-t"])
+        self.run_cmd(self.cmd + ["--toggle-mute"])
 
 
-class PactlBackend(AudioBackend):
+class Pactl(Audio):
     def setup(self, parent):
         # get available device number if not specified
-        self.device_type = 'source' if self.is_input else 'sink'
-        self.device_type_pl = self.device_type + 's'
+        self.device_type = "source" if self.is_input else "sink"
+        self.device_type_pl = self.device_type + "s"
         self.device_type_cap = self.device_type[0].upper() + self.device_type[1:]
 
-        self.reinit_device = self.device is None
-        if self.device is None:
+        self.use_default_device = self.device is None
+        if self.use_default_device:
             self.device = self.get_default_device()
-
-        self.max_volume = parent.max_volume
         self.update_device()
 
     def update_device(self):
         self.re_volume = re.compile(
-            r'{} \#{}.*?State: (\w+).*?Mute: (\w{{2,3}}).*?Volume:.*?(\d{{1,3}})\%'.format(
-                self.device_type_cap, self.device
-            ), re.M | re.DOTALL
+            r"{} (?:\#{}|.*?Name: {}).*?Mute: (\w{{2,3}}).*?Volume:.*?(\d{{1,3}})\%".format(
+                self.device_type_cap, self.device, self.device
+            ),
+            re.M | re.DOTALL,
         )
 
     def get_default_device(self):
         device_id = None
 
         # Find the default device for the device type
-        default_dev_pattern = re.compile(r'^Default {}: (.*)$'.format(self.device_type_cap))
-        output = self.command_output(['pactl', 'info'])
+        default_dev_pattern = re.compile(
+            r"^Default {}: (.*)$".format(self.device_type_cap)
+        )
+        output = self.command_output(["pactl", "info"])
         for info_line in output.splitlines():
             default_dev_match = default_dev_pattern.match(info_line)
             if default_dev_match is not None:
@@ -217,7 +232,9 @@ class PactlBackend(AudioBackend):
 
         # with the long gross id, find the associated number
         if device_id is not None:
-            output = self.command_output(['pactl', 'list', 'short', self.device_type_pl])
+            output = self.command_output(
+                ["pactl", "list", "short", self.device_type_pl]
+            )
             for line in output.splitlines():
                 parts = line.split()
                 if len(parts) < 2:
@@ -225,54 +242,63 @@ class PactlBackend(AudioBackend):
                 if parts[1] == device_id:
                     return parts[0]
 
-        raise RuntimeError('Failed to find default {} device.  Looked for {}'.format(
-            'input' if self.is_input else 'output', device_id))
+        raise RuntimeError(
+            "Failed to find default {} device.  Looked for {}".format(
+                "input" if self.is_input else "output", device_id
+            )
+        )
 
     def get_volume(self):
-        output = self.command_output(['pactl', 'list', self.device_type_pl]).strip()
-        try:
-            state, muted, perc = self.re_volume.search(output).groups()
-        except AttributeError:
-            state, muted, perc = None, False, 0
-            # if device is unset, try again with possibly
-            # a new default device, otherwise print 0
-        if self.reinit_device and state != 'RUNNING':
+        output = self.command_output(["pactl", "list", self.device_type_pl]).strip()
+        if self.use_default_device:
             self.device = self.get_default_device()
             self.update_device()
-
-        # muted should be 'on' or 'off'
-        if muted in ['yes', 'no']:
-            muted = (muted == 'yes')
-        else:
-            muted = False
-
+        try:
+            muted, perc = self.re_volume.search(output).groups()
+            muted = muted == "yes"
+        except AttributeError:
+            muted, perc = None, None
         return perc, muted
 
     def volume_up(self, delta):
         perc, muted = self.get_volume()
         if int(perc) + delta >= self.max_volume:
-            change = '{}%'.format(self.max_volume)
+            change = "{}%".format(self.max_volume)
         else:
-            change = '+{}%'.format(delta)
-        self.run_cmd(['pactl', '--',
-                      'set-{}-volume'.format(self.device_type),
-                      self.device, change])
+            change = "+{}%".format(delta)
+        self.run_cmd(
+            [
+                "pactl",
+                "--",
+                "set-{}-volume".format(self.device_type),
+                self.device,
+                change,
+            ]
+        )
 
     def volume_down(self, delta):
-        self.run_cmd(['pactl', '--',
-                      'set-{}-volume'.format(self.device_type),
-                      self.device, '-{}%'.format(delta)])
+        self.run_cmd(
+            [
+                "pactl",
+                "--",
+                "set-{}-volume".format(self.device_type),
+                self.device,
+                "-{}%".format(delta),
+            ]
+        )
 
     def toggle_mute(self):
-        self.run_cmd(['pactl',
-                      'set-{}-mute'.format(self.device_type),
-                      self.device, 'toggle'])
+        self.run_cmd(
+            ["pactl", "set-{}-mute".format(self.device_type), self.device, "toggle"]
+        )
 
 
 class Py3status:
     """
     """
+
     # available configuration parameters
+    blocks = u"_▁▂▃▄▅▆▇█"
     button_down = 5
     button_mute = 1
     button_up = 4
@@ -281,48 +307,46 @@ class Py3status:
     channel = None
     command = None
     device = None
-    format = u'[\?if=is_input 😮|♪]: {percentage}%'
-    format_muted = u'[\?if=is_input 😶|♪]: muted'
+    format = u"[\?if=is_input 😮|♪]: {percentage}%"
+    format_muted = u"[\?if=is_input 😶|♪]: muted"
     is_input = False
     max_volume = 120
-    thresholds = [(0, 'bad'), (20, 'degraded'), (50, 'good')]
+    thresholds = [(0, "bad"), (20, "degraded"), (50, "good")]
     volume_delta = 5
 
     class Meta:
         def deprecate_function(config):
             # support old thresholds
             return {
-                'thresholds': [
-                    (0, 'bad'),
-                    (config.get('threshold_bad', 20), 'degraded'),
-                    (config.get('threshold_degraded', 50), 'good'),
+                "thresholds": [
+                    (0, "bad"),
+                    (config.get("threshold_bad", 20), "degraded"),
+                    (config.get("threshold_degraded", 50), "good"),
                 ]
             }
 
         deprecated = {
-            'function': [
-                {'function': deprecate_function},
+            "function": [{"function": deprecate_function}],
+            "remove": [
+                {
+                    "param": "threshold_bad",
+                    "msg": "obsolete set using thresholds parameter",
+                },
+                {
+                    "param": "threshold_degraded",
+                    "msg": "obsolete set using thresholds parameter",
+                },
             ],
-            'remove': [
-                {
-                    'param': 'threshold_bad',
-                    'msg': 'obsolete set using thresholds parameter',
-                },
-                {
-                    'param': 'threshold_degraded',
-                    'msg': 'obsolete set using thresholds parameter',
-                },
-            ]
         }
 
     def post_config_hook(self):
         if not self.command:
-            commands = ['pamixer', 'pactl', 'amixer']
+            commands = ["pamixer", "pactl", "amixer"]
             # pamixer, pactl requires pulseaudio to work
-            if not self.py3.check_commands('pulseaudio'):
-                commands = ['amixer']
+            if not self.py3.check_commands("pulseaudio"):
+                commands = ["amixer"]
             self.command = self.py3.check_commands(commands)
-        elif self.command not in ['amixer', 'pamixer', 'pactl']:
+        elif self.command not in ["amixer", "pamixer", "pactl"]:
             raise Exception(STRING_ERROR % self.command)
         elif not self.py3.check_commands(self.command):
             raise Exception(COMMAND_NOT_INSTALLED % self.command)
@@ -331,61 +355,50 @@ class Py3status:
 
         # turn integers to strings
         if self.card is not None:
-            self.card = '%s' % self.card
+            self.card = str(self.card)
         if self.device is not None:
-            self.device = '%s' % self.device
-        self.volume_delta = int(self.volume_delta)
+            self.device = str(self.device)
 
-        if self.command == 'amixer':
-            self.backend = AmixerBackend(self)
-        elif self.command == 'pamixer':
-            self.backend = PamixerBackend(self)
-        elif self.command == 'pactl':
-            self.backend = PactlBackend(self)
+        self.backend = globals()[self.command.capitalize()](self)
+        self.color_muted = self.py3.COLOR_MUTED or self.py3.COLOR_BAD
 
-    # compares current volume to the thresholds, returns a color code
-    def _perc_to_color(self, string):
-        return self.py3.threshold_get_color(string)
-
-    # return the format string formatted with available variables
-    def _format_output(self, format, percentage):
-        text = self.py3.safe_format(format, {'percentage': percentage})
-        return text
-
-    def current_volume(self):
-        # call backend
+    def volume_status(self):
         perc, muted = self.backend.get_volume()
-
         color = None
-        if muted:
-            color = self.py3.COLOR_MUTED or self.py3.COLOR_BAD
-        if not self.py3.is_color(color):
-            # determine the color based on the current volume level
-            color = self._perc_to_color(perc)
+        icon = None
+        new_format = self.format
 
-        # format the output
-        text = self._format_output(self.format_muted
-                                   if muted else self.format, perc)
-        # create response dict
-        response = {
-            'cached_until': self.py3.time_in(self.cache_timeout),
-            'color': color,
-            'full_text': text,
+        if perc is None:
+            perc = "?"
+        elif muted:
+            color = self.color_muted
+            new_format = self.format_muted
+        else:
+            color = self.py3.threshold_get_color(perc)
+            icon = self.blocks[
+                min(
+                    len(self.blocks) - 1,
+                    int(math.ceil(int(perc) / 100 * (len(self.blocks) - 1))),
+                )
+            ]
+
+        volume_data = {"icon": icon, "percentage": perc}
+
+        return {
+            "cached_until": self.py3.time_in(self.cache_timeout),
+            "full_text": self.py3.safe_format(new_format, volume_data),
+            "color": color,
         }
-        return response
 
     def on_click(self, event):
-        """
-        Volume up/down and toggle mute.
-        """
-        button = event['button']
-        # volume up
+        button = event["button"]
         if button == self.button_up:
-            self.backend.volume_up(self.volume_delta)
-        # volume down
+            try:
+                self.backend.volume_up(self.volume_delta)
+            except TypeError:
+                pass
         elif button == self.button_down:
             self.backend.volume_down(self.volume_delta)
-        # toggle mute
         elif button == self.button_mute:
             self.backend.toggle_mute()
 
@@ -395,4 +408,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

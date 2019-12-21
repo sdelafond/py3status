@@ -15,9 +15,12 @@ Format placeholders:
     {minutes} minutes
     {seconds} seconds
 
-Note: If you don't use a placeholder, its value will be carried over
+    If you don't use a placeholder, its value will be carried over
     to the next placeholder. For example, an uptime of 1 hour 30 minutes
     will give you 90 if {minutes} or 1:30 if {hours}:{minutes}.
+
+    You also can specify strftime characters to print system up since
+    with or without placeholders. See `man strftime` for more information.
 
 Examples:
 ```
@@ -43,9 +46,15 @@ group uptime {
             [\?if=minutes {minutes:02d}]'
     }
 }
+
+# specify strftime characters to display system up since
+uptime {
+    format = "{days}d {hours}:{minutes:02d}:{seconds:02d}"
+    format += ", up since %Y-%m-%d %H:%M:%S"
+}
 ```
 
-@author Alexis "Horgix" Chotard <alexis.horgix.chotard@gmail.com>, tobes, lasers
+@author Alexis "Horgix" Chotard <alexis.horgix.chotard@gmail.com>, Volkov "BabyWolf" Semjon <Volkov.BabyWolf.Semjon@gmail.com>
 @license BSD
 
 SAMPLE OUTPUT
@@ -53,43 +62,53 @@ SAMPLE OUTPUT
 """
 
 from time import time
+from datetime import datetime
 from collections import OrderedDict
 
 
 class Py3status:
     """
     """
+
     # available configuration parameters
-    format = 'up {days} days {hours} hours {minutes} minutes'
+    format = "up {days} days {hours} hours {minutes} minutes"
 
     def post_config_hook(self):
         self.time_periods = OrderedDict()
+        self.since = "%" in self.format
         periods = [
-            ('decades', 315360000),
-            ('years', 31536000),
-            ('weeks', 604800),
-            ('days', 86400),
-            ('hours', 3600),
-            ('minutes', 60),
-            ('seconds', 1),
+            ("decades", 315360000),
+            ("years", 31536000),
+            ("weeks", 604800),
+            ("days", 86400),
+            ("hours", 3600),
+            ("minutes", 60),
+            ("seconds", 1),
         ]
+        self.seconds, self.interval = self.py3.CACHE_FOREVER, None
         for unit, second in periods:
             if self.py3.format_contains(self.format, unit):
                 self.time_periods[unit] = second
+                self.seconds, self.interval = None, second
 
     def uptime(self):
-        with open('/proc/uptime', 'r') as f:
+        with open("/proc/uptime") as f:
             up = int(float(f.readline().split()[0]))
             offset = time() - up
 
         uptime = {}
-        for unit in self.time_periods:
-            interval = self.time_periods[unit]
+        for unit, interval in self.time_periods.items():
             uptime[unit], up = divmod(up, interval)
 
+        if self.since:
+            since = datetime.fromtimestamp(offset)
+            new_format = datetime.strftime(since, self.format)
+        else:
+            new_format = self.format
+
         return {
-            'cached_until': self.py3.time_in(sync_to=interval, offset=offset),
-            'full_text': self.py3.safe_format(self.format, uptime)
+            "cached_until": self.py3.time_in(self.seconds, self.interval, offset),
+            "full_text": self.py3.safe_format(new_format, uptime),
         }
 
 
@@ -98,4 +117,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

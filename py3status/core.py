@@ -2,12 +2,12 @@ from __future__ import print_function
 from __future__ import division
 
 import os
+import pkg_resources
 import sys
 import time
 
 from collections import deque
 from json import dumps
-from platform import python_version
 from pprint import pformat
 from signal import signal, SIGTERM, SIGUSR1, SIGTSTP, SIGCONT
 from subprocess import Popen
@@ -15,17 +15,15 @@ from threading import Event, Thread
 from syslog import syslog, LOG_ERR, LOG_INFO, LOG_WARNING
 from traceback import extract_tb, format_tb, format_stack
 
-import py3status.docstrings as docstrings
 from py3status.command import CommandServer
-from py3status.constants import COLOR_NAMES
 from py3status.events import Events
+from py3status.formatter import expand_color
 from py3status.helpers import print_stderr
 from py3status.i3status import I3status
 from py3status.parse_config import process_config
 from py3status.module import Module
 from py3status.profiling import profile
 from py3status.udev_monitor import UdevMonitor
-from py3status.version import version
 
 LOG_LEVELS = {"error": LOG_ERR, "warning": LOG_WARNING, "info": LOG_INFO}
 
@@ -41,6 +39,9 @@ CONFIG_SPECIAL_SECTIONS = [
     "py3_modules",
     "py3status",
 ]
+
+ENTRY_POINT_NAME = "py3status"
+ENTRY_POINT_KEY = "entry_point"
 
 
 class Runner(Thread):
@@ -163,20 +164,8 @@ class Common:
             # check py3status general section
             param = config["general"].get(attribute, self.none_setting)
         if param and (attribute == "color" or attribute.startswith("color_")):
-            if param[0] != "#":
-                # named color
-                param = COLOR_NAMES.get(param.lower(), self.none_setting)
-            elif len(param) == 4:
-                # This is a color like #123 convert it to #112233
-                param = (
-                    "#"
-                    + param[1]
-                    + param[1]
-                    + param[2]
-                    + param[2]
-                    + param[3]
-                    + param[3]
-                )
+            # check color value
+            param = expand_color(param.lower(), self.none_setting)
         return param
 
     def report_exception(self, msg, notify_user=True, level="error", error_frame=None):
@@ -196,9 +185,7 @@ class Common:
         NOTE: msg should not end in a '.' for consistency.
         """
         # Get list of paths that our stack trace should be found in.
-        py3_paths = [os.path.dirname(__file__)]
-        user_paths = self.config.get("include_paths", [])
-        py3_paths += [os.path.abspath(path) + "/" for path in user_paths]
+        py3_paths = [os.path.dirname(__file__)] + self.config["include_paths"]
         traceback = None
 
         try:
@@ -265,7 +252,7 @@ class Py3statusWrapper:
         """
         Useful variables we'll need.
         """
-        self.config = {}
+        self.config = vars(options)
         self.i3bar_running = True
         self.last_refresh_ts = time.time()
         self.lock = Event()
@@ -420,47 +407,6 @@ class Py3statusWrapper:
         if self.timeout_due is not None:
             return self.timeout_due - time.time()
 
-    def get_config(self):
-        """
-        Create the py3status based on command line options we received.
-        """
-        # get home path
-        home_path = os.path.expanduser("~")
-
-        # defaults
-        config = {"minimum_interval": 0.1}  # minimum module update interval
-
-        # include path to search for user modules
-        config["include_paths"] = [
-            "{}/.i3/py3status/".format(home_path),
-            "{}/.config/i3/py3status/".format(home_path),
-            "{}/i3status/py3status".format(
-                os.environ.get("XDG_CONFIG_HOME", "{}/.config".format(home_path))
-            ),
-            "{}/i3/py3status".format(
-                os.environ.get("XDG_CONFIG_HOME", "{}/.config".format(home_path))
-            ),
-        ]
-        config["version"] = version
-
-        # override configuration and helper variables
-        options = self.options
-        config["cache_timeout"] = options.cache_timeout
-        config["debug"] = options.debug
-        config["dbus_notify"] = options.dbus_notify
-        config["gevent"] = options.gevent
-        if options.include_paths:
-            config["include_paths"] = options.include_paths
-        # FIXME we allow giving interval as a float and then make it an int!
-        config["interval"] = int(options.interval)
-        config["log_file"] = options.log_file
-        config["standalone"] = options.standalone
-        config["i3status_config_path"] = options.i3status_conf
-        config["disable_click_events"] = options.disable_click_events
-        if options.cli_command:
-            config["cli_command"] = options.cli_command
-        return config
-
     def gevent_monkey_patch_report(self):
         """
         Report effective gevent monkey patching on the logs.
@@ -471,12 +417,27 @@ class Py3statusWrapper:
 
             if gevent.socket.socket is socket.socket:
                 self.log("gevent monkey patching is active")
+                return True
             else:
                 self.notify_user("gevent monkey patching failed.")
         except ImportError:
             self.notify_user("gevent is not installed, monkey patching failed.")
+        return False
 
     def get_user_modules(self):
+        """Mapping from module name to relevant objects.
+
+        There are two ways of discovery and storage:
+        `include_paths` (no installation): include_path, f_name
+        `entry_point` (from installed package): "entry_point", <Py3Status class>
+
+        Modules of the same name from entry points shadow all other modules.
+        """
+        user_modules = self._get_path_based_modules()
+        user_modules.update(self._get_entry_point_based_modules())
+        return user_modules
+
+    def _get_path_based_modules(self):
         """
         Search configured include directories for user provided modules.
 
@@ -486,9 +447,6 @@ class Py3statusWrapper:
         """
         user_modules = {}
         for include_path in self.config["include_paths"]:
-            include_path = os.path.abspath(include_path) + "/"
-            if not os.path.isdir(include_path):
-                continue
             for f_name in sorted(os.listdir(include_path)):
                 if not f_name.endswith(".py"):
                     continue
@@ -497,12 +455,35 @@ class Py3statusWrapper:
                 if module_name in user_modules:
                     pass
                 user_modules[module_name] = (include_path, f_name)
+                self.log(
+                    "available module from {}: {}".format(include_path, module_name)
+                )
         return user_modules
+
+    def _get_entry_point_based_modules(self):
+        classes_from_entry_points = {}
+        for entry_point in pkg_resources.iter_entry_points(ENTRY_POINT_NAME):
+            try:
+                module = entry_point.load()
+            except Exception as err:
+                self.log("entry_point '{}' error: {}".format(entry_point, err))
+                continue
+            klass = getattr(module, Module.EXPECTED_CLASS, None)
+            if klass:
+                module_name = entry_point.module_name.split(".")[-1]
+                classes_from_entry_points[module_name] = (ENTRY_POINT_KEY, klass)
+                self.log(
+                    "available module from {}: {}".format(ENTRY_POINT_KEY, module_name)
+                )
+        return classes_from_entry_points
 
     def get_user_configured_modules(self):
         """
         Get a dict of all available and configured py3status modules
         in the user's i3status.conf.
+
+        As we already have a convenient way of loading the module, we'll
+        populate the map with the Py3Status class right away
         """
         user_modules = {}
         if not self.py3_modules:
@@ -510,8 +491,8 @@ class Py3statusWrapper:
         for module_name, module_info in self.get_user_modules().items():
             for module in self.py3_modules:
                 if module_name == module.split(" ")[0]:
-                    include_path, f_name = module_info
-                    user_modules[module_name] = (include_path, f_name)
+                    source, item = module_info
+                    user_modules[module_name] = (source, item)
         return user_modules
 
     def load_modules(self, modules_list, user_modules):
@@ -519,9 +500,10 @@ class Py3statusWrapper:
         Load the given modules from the list (contains instance name) with
         respect to the user provided modules dict.
 
-        modules_list: ['weather_yahoo paris', 'net_rate']
+        modules_list: ['weather_yahoo paris', 'pewpew', 'net_rate']
         user_modules: {
-            'weather_yahoo': ('/etc/py3status.d/', 'weather_yahoo.py')
+            'weather_yahoo': ('/etc/py3status.d/', 'weather_yahoo.py'),
+            'pewpew': ('entry_point', <Py3Status class>),
         }
         """
         for module in modules_list:
@@ -529,7 +511,13 @@ class Py3statusWrapper:
             if module in self.modules:
                 continue
             try:
-                my_m = Module(module, user_modules, self)
+                instance = None
+                payload = user_modules.get(module)
+                if payload:
+                    kind, Klass = payload
+                    if kind == ENTRY_POINT_KEY:
+                        instance = Klass()
+                my_m = Module(module, user_modules, self, instance=instance)
                 # only handle modules with available methods
                 if my_m.methods:
                     self.modules[module] = my_m
@@ -553,21 +541,10 @@ class Py3statusWrapper:
         # SIGCONT indicates output should be resumed.
         signal(SIGCONT, self.i3bar_start)
 
-        # update configuration
-        self.config.update(self.get_config())
-
-        if self.config.get("cli_command"):
-            self.handle_cli_command(self.config)
-            sys.exit()
-
-        # logging functionality now available
         # log py3status and python versions
         self.log("=" * 8)
-        self.log(
-            "Starting py3status version {} python {}".format(
-                self.config["version"], python_version()
-            )
-        )
+        msg = "Starting py3status version {version} python {python_version}"
+        self.log(msg.format(**self.config))
 
         try:
             # if running from git then log the branch and last commit
@@ -588,15 +565,29 @@ class Py3statusWrapper:
         except:  # noqa e722
             pass
 
+        self.log("window manager: {}".format(self.config["wm_name"]))
+
         if self.config["debug"]:
             self.log("py3status started with config {}".format(self.config))
 
         if self.config["gevent"]:
-            self.gevent_monkey_patch_report()
+            self.is_gevent = self.gevent_monkey_patch_report()
+        else:
+            self.is_gevent = False
 
         # read i3status.conf
         config_path = self.config["i3status_config_path"]
+        self.log("config file: {}".format(self.config["i3status_config_path"]))
         self.config["py3_config"] = process_config(config_path, self)
+
+        # read resources
+        if "resources" in str(self.config["py3_config"].values()):
+            from subprocess import check_output
+
+            resources = check_output(["xrdb", "-query"]).decode().splitlines()
+            self.config["resources"] = {
+                k: v.strip() for k, v in (x.split(":", 1) for x in resources)
+            }
 
         # setup i3status thread
         self.i3status_thread = I3status(self)
@@ -608,6 +599,8 @@ class Py3statusWrapper:
             self.i3status_thread.mock()
             i3s_mode = "mocked"
         else:
+            for module in i3s_modules:
+                self.log("adding module {}".format(module))
             i3s_mode = "started"
             self.i3status_thread.start()
             while not self.i3status_thread.ready:
@@ -649,7 +642,7 @@ class Py3statusWrapper:
         # initialize the udev monitor (lazy)
         self.udev_monitor = UdevMonitor(self)
 
-        # suppress modules' ouput wrt issue #20
+        # suppress modules' output wrt issue #20
         if not self.config["debug"]:
             sys.stdout = open("/dev/null", "w")
             sys.stderr = open("/dev/null", "w")
@@ -658,6 +651,7 @@ class Py3statusWrapper:
         self.py3_modules = self.config["py3_config"]["py3_modules"]
 
         # get a dict of all user provided modules
+        self.log("modules include paths: {}".format(self.config["include_paths"]))
         user_modules = self.get_user_configured_modules()
         if self.config["debug"]:
             self.log("user_modules={}".format(user_modules))
@@ -735,10 +729,10 @@ class Py3statusWrapper:
             else:
                 py3_config = self.config.get("py3_config", {})
                 nagbar_font = py3_config.get("py3status", {}).get("nagbar_font")
+                wm_nag = self.config["wm"]["nag"]
+                cmd = [wm_nag, "-m", msg, "-t", level]
                 if nagbar_font:
-                    cmd = ["i3-nagbar", "-f", nagbar_font, "-m", msg, "-t", level]
-                else:
-                    cmd = ["i3-nagbar", "-m", msg, "-t", level]
+                    cmd += ["-f", nagbar_font]
             Popen(cmd, stdout=open("/dev/null", "w"), stderr=open("/dev/null", "w"))
         except Exception as err:
             self.log("notify_user error: %s" % err)
@@ -809,6 +803,7 @@ class Py3statusWrapper:
         """
         Received request to terminate (SIGTERM), exit nicely.
         """
+        self.log("received SIGTERM")
         raise KeyboardInterrupt()
 
     def purge_module(self, module_name):
@@ -875,7 +870,7 @@ class Py3statusWrapper:
             # Binary mode so fs encoding setting is not an issue
             with open(self.config["log_file"], "ab") as f:
                 log_time = time.strftime("%Y-%m-%d %H:%M:%S")
-                # nice formating of data structures using pretty print
+                # nice formatting of data structures using pretty print
                 if isinstance(msg, (dict, list, set, tuple)):
                     msg = pformat(msg)
                     # if multiline then start the data output on a fresh line
@@ -956,12 +951,14 @@ class Py3statusWrapper:
         return ",".join([dumps(x) for x in outputs])
 
     def i3bar_stop(self, signum, frame):
+        self.log("received SIGTSTP")
         self.i3bar_running = False
         # i3status should be stopped
         self.i3status_thread.suspend_i3status()
         self.sleep_modules()
 
     def i3bar_start(self, signum, frame):
+        self.log("received SIGCONT")
         self.i3bar_running = True
         self.wake_modules()
 
@@ -1014,7 +1011,7 @@ class Py3statusWrapper:
         # start our output
         header = {
             "version": 1,
-            "click_events": not self.config["disable_click_events"],
+            "click_events": self.config["click_events"],
             "stop_signal": SIGTSTP,
         }
         write(dumps(header))
@@ -1050,39 +1047,3 @@ class Py3statusWrapper:
                 # dump the line to stdout
                 write(",[{}]\n".format(out))
                 flush()
-
-    def handle_cli_command(self, config):
-        """Handle a command from the CLI.
-        """
-        cmd = config["cli_command"]
-        # aliases
-        if cmd[0] in ["mod", "module", "modules"]:
-            cmd[0] = "modules"
-
-        # allowed cli commands
-        if cmd[:2] in (["modules", "list"], ["modules", "details"]):
-            docstrings.show_modules(config, cmd[1:])
-        # docstring formatting and checking
-        elif cmd[:2] in (["docstring", "check"], ["docstring", "update"]):
-            if cmd[1] == "check":
-                show_diff = len(cmd) > 2 and cmd[2] == "diff"
-                if show_diff:
-                    mods = cmd[3:]
-                else:
-                    mods = cmd[2:]
-                docstrings.check_docstrings(show_diff, config, mods)
-            if cmd[1] == "update":
-                if len(cmd) < 3:
-                    print_stderr("Error: you must specify what to update")
-                    sys.exit(1)
-
-                if cmd[2] == "modules":
-                    docstrings.update_docstrings()
-                else:
-                    docstrings.update_readme_for_modules(cmd[2:])
-        elif cmd[:2] in (["modules", "enable"], ["modules", "disable"]):
-            # TODO: to be implemented
-            pass
-        else:
-            print_stderr("Error: unknown command")
-            sys.exit(1)

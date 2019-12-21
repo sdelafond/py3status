@@ -15,6 +15,7 @@ from py3status.constants import (
     MAX_NESTING_LEVELS,
     ERROR_CONFIG,
     GENERAL_DEFAULTS,
+    RETIRED_MODULES,
     TIME_MODULES,
     TIME_FORMAT,
     TZTIME_FORMAT,
@@ -845,6 +846,20 @@ def process_config(config_path, py3_wrapper=None):
 
     # create config for modules in order
     for name in config_info.get("order", []):
+        if name in module_groups:
+            msg = "Module `{}` should not be listed in the 'order' directive, use"
+            msg += " its parent group instead."
+            notify_user(msg.format(name))
+            continue
+        module_name = name.split(" ")[0]
+        if module_name in RETIRED_MODULES:
+            old = "`{}`".format(module_name)
+            new = ", ".join(
+                "`{}`".format(x) for x in RETIRED_MODULES[module_name]["new"]
+            )
+            msg = RETIRED_MODULES[module_name]["msg"].format(old=old, new=new)
+            notify_user(msg)
+            continue
         module = modules.get(name, {})
         config["order"].append(name)
         add_container_items(name)
