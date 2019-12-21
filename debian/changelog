@@ -1,3 +1,10 @@
+py3status (3.22-1) unstable; urgency=medium
+
+  * New upstream version 3.22
+  * Bump up Standards-Version
+
+ -- Sebastien Delafond <seb@debian.org>  Sat, 21 Dec 2019 08:34:44 +0100
+
 py3status (3.14-2) unstable; urgency=medium
 
   * Depend on file (Closes: #927164)
