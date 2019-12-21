@@ -223,7 +223,7 @@ class I3statusModule:
         # get datetime and time zone info
         parts = i3s_time.split()
         i3s_datetime = " ".join(parts[:2])
-        # occassionally we do not get the timezone name
+        # occasionally we do not get the timezone name
         if len(parts) < 3:
             return True
         else:
@@ -255,23 +255,8 @@ class I3status(Thread):
         Thread.__init__(self)
         self.error = None
         self.i3modules = {}
-        self.i3status_module_names = [
-            "battery",
-            "cpu_temperature",
-            "cpu_usage",
-            "ddate",
-            "disk",
-            "ethernet",
-            "ipv6",
-            "load",
-            "path_exists",
-            "run_watch",
-            "time",
-            "tztime",
-            "volume",
-            "wireless",
-        ]
         self.i3status_pipe = None
+        self.i3status_path = py3_wrapper.config["i3status_path"]
         self.json_list = None
         self.json_list_ts = None
         self.last_output = None
@@ -302,20 +287,6 @@ class I3status(Thread):
             self.i3modules[conf_name] = module
             if module.is_time_module:
                 self.time_modules.append(module)
-
-    def valid_config_param(self, param_name, cleanup=False):
-        """
-        Check if a given section name is a valid parameter for i3status.
-        """
-        if cleanup:
-            valid_config_params = [
-                _
-                for _ in self.i3status_module_names
-                if _ not in ["cpu_usage", "ddate", "ipv6", "load", "time"]
-            ]
-        else:
-            valid_config_params = self.i3status_module_names + ["general", "order"]
-        return param_name.split(" ")[0] in valid_config_params
 
     def set_responses(self, json_list):
         """
@@ -424,7 +395,7 @@ class I3status(Thread):
                 self.write_tmp_i3status_config(tmpfile)
 
                 i3status_pipe = Popen(
-                    ["i3status", "-c", tmpfile.name],
+                    [self.i3status_path, "-c", tmpfile.name],
                     stdout=PIPE,
                     stderr=PIPE,
                     # Ignore the SIGTSTP signal for this subprocess

@@ -1,3 +1,4 @@
+from ast import literal_eval
 from sys import argv
 from threading import Event
 from time import sleep, time
@@ -26,6 +27,7 @@ class MockPy3statusWrapper:
             "minimum_interval": 0.1,
             "testing": True,
             "log_file": True,
+            "wm": {"msg": "i3-msg", "nag": "i3-nagbar"},
         }
         self.events_thread = self.EventThread()
         self.udev_monitor = self.UdevMonitor()
@@ -33,6 +35,7 @@ class MockPy3statusWrapper:
         self.lock = Event()
         self.output_modules = {}
         self.running = True
+        self.is_gevent = False
 
         self.lock.set()
 
@@ -58,6 +61,20 @@ def module_test(module_class, config=None):
 
     if not config:
         config = {}
+
+    # config cli arguments
+    arguments, term = argv[1:], False
+    for index, arg in enumerate(arguments):
+        if "--term" in arg:
+            term = True
+        elif arg[0:2] == "--":
+            key = arguments[index][2:]
+            value = arguments[index + 1]
+            try:
+                value = literal_eval(value)
+            except (SyntaxError, ValueError):
+                pass
+            config[key] = value
 
     py3_config = {
         "general": {
@@ -89,14 +106,17 @@ def module_test(module_class, config=None):
                 if "name" in item:
                     del item["name"]
 
-            if "--term" in argv:
-                line = ""
+            if term:
+                line = "\033[0m"
                 for item in output:
-                    color = item.get("color")
-                    if color:
-                        line += "\033[38;2;{};{};{}m".format(
-                            *[int(color[1:][i : i + 2], 16) for i in (0, 2, 4)]
-                        )
+                    if item.get("urgent"):
+                        line += "\033[41m"
+                    else:
+                        color = item.get("color")
+                        if color:
+                            line += "\033[38;2;{};{};{}m".format(
+                                *[int(color[1:][i : i + 2], 16) for i in (0, 2, 4)]
+                            )
                     line += item["full_text"] + "\033[0m"
                 print(line)
             else:

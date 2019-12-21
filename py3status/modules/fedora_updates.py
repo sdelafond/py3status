@@ -3,8 +3,7 @@
 Display number of pending updates for Fedora Linux.
 
 This will display a count of how many `dnf` updates are waiting
-to be installed.
-Additionally check if any update security notices.
+to be installed. Additionally check for update security notices.
 
 Configuration parameters:
     cache_timeout: How often we refresh this module in seconds
@@ -36,31 +35,31 @@ import re
 class Py3status:
     """
     """
+
     # available configuration parameters
     cache_timeout = 600
     check_security = True
-    format = 'DNF: {updates}'
+    format = "DNF: {updates}"
 
     def post_config_hook(self):
-        self._reg_ex_sec = re.compile(r'\d+(?=\s+Security)')
-        self._reg_ex_pkg = re.compile(b'^\\S+\\.', re.M)
+        self._reg_ex_sec = re.compile(r"\d+(?=\s+Security)")
+        self._reg_ex_pkg = re.compile(b"^\\S+\\.", re.M)
         self._first = True
         self._updates = 0
         self._security_notice = False
 
-    def check_updates(self):
+    def fedora_updates(self):
         if self._first:
             self._first = False
             response = {
-                'cached_until': self.py3.time_in(0),
-                'full_text': self.py3.safe_format(self.format, {'updates': '?'})
+                "cached_until": self.py3.time_in(0),
+                "full_text": self.py3.safe_format(self.format, {"updates": "?"}),
             }
             return response
 
         output, error = subprocess.Popen(
-            ['dnf', 'check-update'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE).communicate()
+            ["dnf", "check-update"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).communicate()
 
         updates = len(self._reg_ex_pkg.findall(output))
 
@@ -72,11 +71,16 @@ class Py3status:
             if self._updates > updates:
                 # we have installed some updates so re-check security
                 self._security_notice = False
-            if self.check_security and not self._security_notice and self._updates != updates:
+            if (
+                self.check_security
+                and not self._security_notice
+                and self._updates != updates
+            ):
                 output, error = subprocess.Popen(
-                    ['dnf', 'updateinfo'],
+                    ["dnf", "updateinfo"],
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE).communicate()
+                    stderr=subprocess.PIPE,
+                ).communicate()
                 notices = str(output)
                 self._security_notice = len(self._reg_ex_sec.findall(notices))
                 self._updates = updates
@@ -86,9 +90,9 @@ class Py3status:
                 color = self.py3.COLOR_DEGRADED
 
         response = {
-            'cached_until': self.py3.time_in(self.cache_timeout),
-            'color': color,
-            'full_text': self.py3.safe_format(self.format, {'updates': updates})
+            "cached_until": self.py3.time_in(self.cache_timeout),
+            "color": color,
+            "full_text": self.py3.safe_format(self.format, {"updates": updates}),
         }
         return response
 
@@ -98,4 +102,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

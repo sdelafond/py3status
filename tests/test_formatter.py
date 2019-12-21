@@ -66,7 +66,7 @@ class Module:
 
     class py3:
         COLOR_BAD = "#FF0000"
-        COLOR_DEGRADED = "#FF00"
+        COLOR_DEGRADED = "#FFFF00"
         COLOR_GOOD = "#00FF00"
 
     def module_method(self):
@@ -156,6 +156,20 @@ def update_placeholders(test_dict):
 
     if python2 and isinstance(expected, str):
         expected = expected.decode("utf-8")
+
+    if result != expected:
+        print("Format\n{}\n".format(test_dict["format"]))
+        print("Expected\n{}".format(pformat(expected)))
+        print("Got\n{}".format(pformat(result)))
+    if result != expected:
+        pytest.fail("Results not as expected")
+
+
+def get_color_names(test_dict):
+    __tracebackhide__ = True
+
+    result = f.get_color_names(test_dict["format"])
+    expected = test_dict.get("expected")
 
     if result != expected:
         print("Format\n{}\n".format(test_dict["format"]))
@@ -387,7 +401,7 @@ def test_44():
 
 
 def test_45():
-    # the repesentation is different in python2 "u'Björk'"
+    # the representation is different in python2 "u'Björk'"
     run_formatter({"format": "{name!r}", "expected": "'Björk'", "py3only": True})
 
 
@@ -825,6 +839,44 @@ def test_color_9a():
                 {"color": "#FF0000", "full_text": "LA 09:34"},
                 {"color": "#00FF00", "full_text": "NY 12:34"},
             ],
+        }
+    )
+
+
+def test_color_10():
+    # correct, but code is py3 instead of composite/formatter. same w/ color=hidden.
+    run_formatter(
+        {
+            "format": r"[\?color=None&show None][\?color=degraded&show degraded]",
+            "expected": [
+                {"full_text": "None"},
+                {"full_text": "degraded", "color": "#FFFF00"},
+            ],
+        }
+    )
+
+
+def test_color_11():
+    # one would say it's right, but maybe one would say it's wrong too.
+    run_formatter(
+        {
+            "format": r"[\?color=ORANGE&show orange] [\?color=bLuE&show blue]",
+            "expected": "orange blue",  # wrong imho
+            # "expected": [
+            #     {"full_text": "orange", "color": "#FFA500"},
+            #     {"full_text": "blue", "color": "#0000FF"},
+            # ],
+        }
+    )
+
+
+def test_color_12():
+    run_formatter(
+        {
+            "color_test": "#FFA500",
+            "format": r"\?color=test test",
+            "expected": "test",  # wrong
+            # "expected": [{"full_text": "test", "color": "#FFA500"}]
         }
     )
 
@@ -1355,6 +1407,42 @@ def test_update_placeholders_5():
             "format": r"\{placeholder\}{placeholder}[\?if=placeholder&color=red something]",
             "updates": {"placeholder": "new_placeholder"},
             "expected": r"\{placeholder\}{new_placeholder}[\?if=new_placeholder&color=red something]",
+        }
+    )
+
+
+def test_get_color_names_1():
+    get_color_names(
+        {
+            "format": r"\?color=red \?color=#0f0 green \?color=#0000ff blue",
+            "expected": set(),
+        }
+    )
+
+
+def test_get_color_names_2():
+    get_color_names(
+        {
+            "format": r"[\?color=tobias funke|\?color=bluemangroup troupe]",
+            "expected": {"tobias", "bluemangroup"},
+        }
+    )
+
+
+def test_get_color_names_3():
+    get_color_names(
+        {
+            "format": r"[\?color=good bonsai tree][\?color=None Saibot]",
+            "expected": set(),
+        }
+    )
+
+
+def test_get_color_names_4():
+    get_color_names(
+        {
+            "format": r"\?color=rebeccapurple \?color=rebecca \?color=purple",
+            "expected": {"rebecca"},
         }
     )
 

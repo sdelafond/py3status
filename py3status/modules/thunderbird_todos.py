@@ -54,16 +54,7 @@ format_datetime placeholders:
     SEE EXAMPLE BELOW: "show incompleted titles with last modified time"
 
 Color thresholds:
-    format:
-        todo_total: print a color based on number of total todos
-        todo_completed: print a color based on number of completed todos
-        todo_incompleted: print a color based on number of incompleted todos
-    format_todo:
-        index_total: print a color based on total todo index
-        index_completed: print a color based on completed todo index
-        index_incompleted: print a color based on incompleted todo index
-        flags: print a color based on flags # DISABLED. What is flags?
-        priority: print a color based on number of todo priority
+    xxx: print a color based on the value of `xxx` placeholder
 
 Requires:
     thunderbird: standalone mail and news reader
@@ -152,56 +143,62 @@ from os import path
 from sqlite3 import connect
 from datetime import datetime
 
-STRING_NO_PROFILE = 'missing profile'
-STRING_NOT_INSTALLED = 'not installed'
-SUPPORTED_FORMAT_TODO_THRESHOLDS = [
-    'index_total', 'index_completed', 'index_incompleted', 'priority']
+STRING_NO_PROFILE = "missing profile"
+STRING_NOT_INSTALLED = "not installed"
 
 
 class Py3status:
     """
     """
+
     # available configuration parameters
     cache_timeout = 60
-    format = '{format_todo}'
+    format = "{format_todo}"
     format_datetime = {}
-    format_separator = ' '
-    format_todo = '\?if=!todo_completed {title}'
+    format_separator = " "
+    format_todo = "\?if=!todo_completed {title}"
     profile = None
     sort = ()
     thresholds = []
 
     def post_config_hook(self):
-        if not self.py3.check_commands('thunderbird'):
+        if not self.py3.check_commands("thunderbird"):
             raise Exception(STRING_NOT_INSTALLED)
 
         # first profile, please.
         if not self.profile:
-            directory = '~/.thunderbird'
-            profile_ini = path.expanduser(directory + '/profiles.ini')
+            directory = "~/.thunderbird"
+            profile_ini = path.expanduser(directory + "/profiles.ini")
             profile = []
             for line in open(profile_ini):
-                if line.startswith('Path='):
-                    profile.append('{}/{}'.format(
-                        directory, line.split('Path=')[-1].strip()))
+                if line.startswith("Path="):
+                    profile.append(
+                        "{}/{}".format(directory, line.split("Path=")[-1].strip())
+                    )
             if not len(profile):
                 raise Exception(STRING_NO_PROFILE)
             self.profile = profile[0]
 
         self.profile = path.expanduser(self.profile)
-        self.path = self.profile + '/calendar-data/local.sqlite'
+        self.path = self.profile + "/calendar-data/local.sqlite"
 
-        # convert the datetime?
         self.init_datetimes = []
         for word in self.format_datetime:
             if (self.py3.format_contains(self.format_todo, word)) and (
-                    word in self.format_datetime):
+                word in self.format_datetime
+            ):
                 self.init_datetimes.append(word)
+
+        self.thresholds_init = {}
+        for name in ["format", "format_todo"]:
+            self.thresholds_init[name] = self.py3.get_color_names_list(
+                getattr(self, name)
+            )
 
     def _get_thunderbird_todos_data(self):
         connection = connect(self.path)
         cursor = connection.cursor()
-        cursor.execute('SELECT * FROM cal_todos')
+        cursor.execute("SELECT * FROM cal_todos")
         keys = [desc[0] for desc in cursor.description]
         todos_data = cursor.fetchall()
         cursor.close()
@@ -211,43 +208,44 @@ class Py3status:
     def _organize(self, data):
         # sort?
         if self.sort:
-            data = sorted(
-                data, key=lambda k: k[self.sort[0]], reverse=self.sort[1])
+            data = sorted(data, key=lambda k: k[self.sort[0]], reverse=self.sort[1])
         # counts and indexes
-        count = {'todo_total': 0, 'todo_completed': 0, 'todo_incompleted': 0}
+        count = {"todo_total": 0, "todo_completed": 0, "todo_incompleted": 0}
         for todo_index, todo in enumerate(data, 1):
-            count['todo_total'] += 1
-            todo['index_total'] = todo_index
-            todo['index_completed'] = todo['index_incompleted'] = None
-            if todo['todo_completed']:
-                count['todo_completed'] += 1
-                todo['index_completed'] = count['todo_completed']
+            count["todo_total"] += 1
+            todo["index_total"] = todo_index
+            todo["index_completed"] = todo["index_incompleted"] = None
+            if todo["todo_completed"]:
+                count["todo_completed"] += 1
+                todo["index_completed"] = count["todo_completed"]
             else:
-                count['todo_incompleted'] += 1
-                todo['index_incompleted'] = count['todo_incompleted']
+                count["todo_incompleted"] += 1
+                todo["index_incompleted"] = count["todo_incompleted"]
 
         return data, count
 
     def _manipulate(self, data, count):
         new_data = []
         for todo in data:
-            # datetimes?
+            # datetimes
             for k in self.init_datetimes:
                 if k in todo:
                     todo[k] = self.py3.safe_format(
-                        datetime.strftime(datetime.fromtimestamp(float(str(
-                            todo[k])[:-6])), self.format_datetime[k]))
-            # use thresholds?
-            if self.thresholds:
-                for x in SUPPORTED_FORMAT_TODO_THRESHOLDS:
-                    if todo[x] is not None:
-                        self.py3.threshold_get_color(todo[x], x)
+                        datetime.strftime(
+                            datetime.fromtimestamp(float(str(todo[k])[:-6])),
+                            self.format_datetime[k],
+                        )
+                    )
+            # thresholds
+            for x in self.thresholds_init["format_todo"]:
+                if x in todo:
+                    self.py3.threshold_get_color(todo[x], x)
 
             new_data.append(self.py3.safe_format(self.format_todo, todo))
 
-        if self.thresholds:
-            for k, v in count.items():
-                self.py3.threshold_get_color(v, k)
+        for x in self.thresholds_init["format"]:
+            if x in count:
+                self.py3.threshold_get_color(count[x], x)
 
         format_separator = self.py3.safe_format(self.format_separator)
         format_todo = self.py3.composite_join(format_separator, new_data)
@@ -260,10 +258,10 @@ class Py3status:
         format_todo = self._manipulate(data, count)
 
         return {
-            'cached_until': self.py3.time_in(self.cache_timeout),
-            'full_text': self.py3.safe_format(
+            "cached_until": self.py3.time_in(self.cache_timeout),
+            "full_text": self.py3.safe_format(
                 self.format, dict(format_todo=format_todo, **count)
-            )
+            ),
         }
 
 
@@ -272,4 +270,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

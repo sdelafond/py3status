@@ -12,7 +12,7 @@ Configuration parameters:
         (default False)
     format: Format of the output.
         (default 'VPN: {name}|VPN: no')
-    pidfile: Same as i3status.conf pidfile, checked when check_pid is True.
+    pidfile: Same as i3status pidfile, checked when check_pid is True.
         (default '/sys/class/net/vpn0/dev_id')
 
 Format placeholders:
@@ -44,11 +44,12 @@ from time import sleep
 class Py3status:
     """
     """
+
     # available configuration parameters
     cache_timeout = 10
     check_pid = False
     format = "VPN: {name}|VPN: no"
-    pidfile = '/sys/class/net/vpn0/dev_id'
+    pidfile = "/sys/class/net/vpn0/dev_id"
 
     def post_config_hook(self):
         self.thread_started = False
@@ -91,19 +92,20 @@ class Py3status:
         sleep(0.3)
         # Check if any active connections are a VPN
         bus = SystemBus()
+        ids = []
         for name in self.active:
             conn = bus.get(".NetworkManager", name)
             if conn.Vpn:
-                return conn.Id
+                ids.append(conn.Id)
         # No active VPN
-        return None
+        return ids
 
     def _check_pid(self):
         """Returns True if pidfile exists, False otherwise."""
         return path.isfile(self.pidfile)
 
     # Method run by py3status
-    def return_status(self):
+    def vpn_status(self):
         """Returns response dict"""
 
         # Start signal handler thread if it should be running
@@ -124,15 +126,15 @@ class Py3status:
         else:
             vpn = self._get_vpn_status()
             if vpn:
-                name = vpn
+                name = ", ".join(vpn)
                 color = self.py3.COLOR_GOOD
 
         # Format and create the response dict
-        full_text = self.py3.safe_format(self.format, {'name': name})
+        full_text = self.py3.safe_format(self.format, {"name": name})
         response = {
-            'full_text': full_text,
-            'color': color,
-            'cached_until': self.py3.CACHE_FOREVER
+            "full_text": full_text,
+            "color": color,
+            "cached_until": self.py3.CACHE_FOREVER,
         }
 
         # Cache forever unless in check_pid mode
@@ -146,4 +148,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

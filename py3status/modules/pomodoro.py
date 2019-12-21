@@ -43,7 +43,7 @@ Color options:
     color_degraded: Pomodoro break
     color_good: Pomodoro active
 
-i3status.conf example:
+Examples:
 ```
 pomodoro {
     format = "{mmss} {bar}"
@@ -62,55 +62,6 @@ running
 from math import ceil
 from threading import Timer
 from time import time
-import os
-
-try:
-    from pygame import mixer as pygame_mixer
-except ImportError:
-    pygame_mixer = None
-
-try:
-    import pyglet
-except ImportError:
-    pyglet = None
-
-
-class Player(object):
-    _default = '_silence'
-
-    def __init__(self):
-        if pyglet is not None:
-            pyglet.options['audio'] = ('pulse', 'silent')
-            self._player = pyglet.media.Player()
-            self._default = '_pyglet'
-        elif pygame_mixer is not None:
-            pygame_mixer.init()
-            self._default = '_pygame'
-
-    def _silence(self, sound_fname):
-        pass
-
-    def _pygame(self, sound_fname):
-        pygame_mixer.music.load(sound_fname)
-        pygame_mixer.music.play()
-
-    def _pyglet(self, sound_fname):
-        res_dir, f = os.path.split(sound_fname)
-
-        if res_dir not in pyglet.resource.path:
-            pyglet.resource.path = [res_dir]
-            pyglet.resource.reindex()
-
-        self._player.queue(pyglet.resource.media(f, streaming=False))
-        self._player.play()
-
-    @property
-    def available(self):
-        return self._default != '_silence'
-
-    def __call__(self, sound_fname):
-        getattr(self, self._default)(os.path.expanduser(sound_fname))
-
 
 PROGRESS_BAR_ITEMS = u"▏▎▍▌▋▊▉"
 
@@ -118,14 +69,15 @@ PROGRESS_BAR_ITEMS = u"▏▎▍▌▋▊▉"
 class Py3status:
     """
     """
+
     # available configuration parameters
     display_bar = False
-    format = u'{ss}'
-    format_active = u'Pomodoro [{format}]'
-    format_break = u'Break #{breakno} [{format}]'
-    format_break_stopped = u'Break #{breakno} ({format})'
+    format = u"{ss}"
+    format_active = u"Pomodoro [{format}]"
+    format_break = u"Break #{breakno} [{format}]"
+    format_break_stopped = u"Break #{breakno} ({format})"
     format_separator = u":"
-    format_stopped = u'Pomodoro ({format})'
+    format_stopped = u"Pomodoro ({format})"
     num_progress_bars = 5
     pomodoros = 4
     sound_break_end = None
@@ -137,12 +89,12 @@ class Py3status:
 
     class Meta:
         deprecated = {
-            'rename': [
+            "rename": [
                 {
-                    'param': 'max_breaks',
-                    'new': 'pomodoros',
-                    'msg': 'obsolete parameter use `pomodoros`',
-                },
+                    "param": "max_breaks",
+                    "new": "pomodoros",
+                    "msg": "obsolete parameter use `pomodoros`",
+                }
             ]
         }
 
@@ -157,17 +109,16 @@ class Py3status:
         self._section_time = self.timer_pomodoro
         self._timer = None
         self._end_time = None
-        self._player = Player()
         self._alert = False
         if self.display_bar is True:
-            self.format = u'{bar}'
+            self.format = u"{bar}"
         self._initialized = True
 
     def _time_up(self):
         if self._active:
-            self.py3.notify_user('Pomodoro time is up !')
+            self.py3.notify_user("Pomodoro time is up !")
         else:
-            self.py3.notify_user('Break #{} time is up !'.format(self._break_number))
+            self.py3.notify_user("Break #{} time is up !".format(self._break_number))
         self._alert = True
         self._advance()
 
@@ -175,7 +126,7 @@ class Py3status:
         self._running = False
         if self._active:
             if not user_action:
-                self._play_sound(self.sound_pomodoro_end)
+                self.py3.play_sound(self.sound_pomodoro_end)
             # start break
             self._time_left = self.timer_break
             self._section_time = self.timer_break
@@ -187,7 +138,7 @@ class Py3status:
             self._active = False
         else:
             if not user_action:
-                self._play_sound(self.sound_break_end)
+                self.py3.play_sound(self.sound_break_end)
             self._time_left = self.timer_pomodoro
             self._section_time = self.timer_pomodoro
             self._active = True
@@ -207,7 +158,7 @@ class Py3status:
             - middle click resets everything
             - right click starts (and ends, if needed) a break
         """
-        if event['button'] == 1:
+        if event["button"] == 1:
             if self._running:
                 self._running = False
                 self._time_left = self._end_time - time()
@@ -221,15 +172,15 @@ class Py3status:
                 self._timer = Timer(self._time_left, self._time_up)
                 self._timer.start()
                 if self._active:
-                    self._play_sound(self.sound_pomodoro_start)
+                    self.py3.play_sound(self.sound_pomodoro_start)
 
-        elif event['button'] == 2:
+        elif event["button"] == 2:
             # reset
             self._init()
             if self._timer:
                 self._timer.cancel()
 
-        elif event['button'] == 3:
+        elif event["button"] == 3:
             # advance
             self._advance(user_action=True)
             if self._timer:
@@ -239,10 +190,9 @@ class Py3status:
         """
         Setup the process bar.
         """
-        bar = u''
+        bar = u""
         items_cnt = len(PROGRESS_BAR_ITEMS)
-        bar_val = float(self._time_left) / self._section_time * \
-            self.num_progress_bars
+        bar_val = float(self._time_left) / self._section_time * self.num_progress_bars
         while bar_val > 0:
             selector = int(bar_val * items_cnt)
             selector = min(selector, items_cnt - 1)
@@ -266,28 +216,25 @@ class Py3status:
         else:
             time_left = ceil(self._time_left)
 
-        vals = {
-            'ss': int(time_left),
-            'mm': int(ceil(time_left / 60)),
-        }
+        vals = {"ss": int(time_left), "mm": int(ceil(time_left / 60))}
 
-        if self.py3.format_contains(self.format, 'mmss'):
+        if self.py3.format_contains(self.format, "mmss"):
             hours, rest = divmod(time_left, 3600)
             mins, seconds = divmod(rest, 60)
 
             if hours:
-                vals['mmss'] = u'%d%s%02d%s%02d' % (hours,
-                                                    self.format_separator,
-                                                    mins,
-                                                    self.format_separator,
-                                                    seconds)
+                vals["mmss"] = u"%d%s%02d%s%02d" % (
+                    hours,
+                    self.format_separator,
+                    mins,
+                    self.format_separator,
+                    seconds,
+                )
             else:
-                vals['mmss'] = u'%d%s%02d' % (mins,
-                                              self.format_separator,
-                                              seconds)
+                vals["mmss"] = u"%d%s%02d" % (mins, self.format_separator, seconds)
 
-        if self.py3.format_contains(self.format, 'bar'):
-            vals['bar'] = self._setup_bar()
+        if self.py3.format_contains(self.format, "bar"):
+            vals["bar"] = self._setup_bar()
 
         formatted = self.format.format(**vals)
 
@@ -304,39 +251,25 @@ class Py3status:
             cached_until = self.py3.CACHE_FOREVER
 
         response = {
-            'full_text': format.format(breakno=self._break_number, format=formatted, **vals),
-            'cached_until': cached_until,
+            "full_text": format.format(
+                breakno=self._break_number, format=formatted, **vals
+            ),
+            "cached_until": cached_until,
         }
 
         if self._alert:
-            response['urgent'] = True
+            response["urgent"] = True
             self._alert = False
 
         if not self._running:
-            response['color'] = self.py3.COLOR_BAD
+            response["color"] = self.py3.COLOR_BAD
         else:
             if self._active:
-                response['color'] = self.py3.COLOR_GOOD
+                response["color"] = self.py3.COLOR_GOOD
             else:
-                response['color'] = self.py3.COLOR_DEGRADED
+                response["color"] = self.py3.COLOR_DEGRADED
 
         return response
-
-    def _play_sound(self, sound_fname):
-        """Play sound if required
-        """
-        if not sound_fname:
-            return
-
-        if not self._player.available:
-            self.py3.log("pomodoro module: the pyglet or pygame "
-                         "library are required to play sounds")
-            return
-
-        try:
-            self._player(sound_fname)
-        except Exception:
-            return
 
 
 if __name__ == "__main__":
@@ -344,4 +277,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

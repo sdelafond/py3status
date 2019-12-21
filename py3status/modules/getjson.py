@@ -12,7 +12,6 @@ Configuration parameters:
     cache_timeout: refresh interval for this module (default 30)
     delimiter: the delimiter between parent and child objects (default '-')
     format: display format for this module (default None)
-    timeout: time to wait for a response, in seconds (default 5)
     url: specify URL to fetch JSON from (default None)
 
 Format placeholders:
@@ -51,18 +50,29 @@ SAMPLE OUTPUT
 {'full_text': 'Github: Everything operating normally'}
 """
 
-STRING_ERROR = 'missing url'
+STRING_ERROR = "missing url"
 
 
 class Py3status:
     """
     """
+
     # available configuration parameters
     cache_timeout = 30
-    delimiter = '-'
+    delimiter = "-"
     format = None
-    timeout = 5
     url = None
+
+    class Meta:
+        deprecated = {
+            "rename": [
+                {
+                    "param": "timeout",
+                    "new": "request_timeout",
+                    "msg": "obsolete parameter use `request_timeout`",
+                }
+            ]
+        }
 
     def post_config_hook(self):
         if not self.url:
@@ -72,7 +82,7 @@ class Py3status:
         """
         """
         try:
-            json_data = self.py3.request(self.url, timeout=self.timeout).json()
+            json_data = self.py3.request(self.url).json()
             json_data = self.py3.flatten_dict(json_data, self.delimiter, True)
         except self.py3.RequestException:
             json_data = None
@@ -80,11 +90,11 @@ class Py3status:
         if json_data:
             full_text = self.py3.safe_format(self.format, json_data)
         else:
-            full_text = ''
+            full_text = ""
 
         return {
-            'cached_until': self.py3.time_in(self.cache_timeout),
-            'full_text': full_text
+            "cached_until": self.py3.time_in(self.cache_timeout),
+            "full_text": full_text,
         }
 
 
@@ -93,4 +103,5 @@ if __name__ == "__main__":
     Run module in test mode.
     """
     from py3status.module_test import module_test
+
     module_test(Py3status)

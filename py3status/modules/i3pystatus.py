@@ -2,22 +2,26 @@
 """
 Support i3pystatus modules in py3status.
 
-[i3pystatus](https://github.com/enkore/i3pystatus) is an alternative to
-py3status and provides a variety of modules.  This py3status module allows
+i3pystatus, https://github.com/enkore/i3pystatus, is an alternative to
+py3status and provides a variety of modules. This py3status module allows
 these modules to run and be display inside py3status.
 
-The modules parameters are provided as such
+Configuration parameters:
+    module: specify i3pystatus module to use (default None)
+
+Requires:
+    i3pystatus: i3status replacement written in python
+
+Examples:
 ```
+# the modules parameters are provided as such
 i3pystatus clock {
     module = 'clock'
-    format = [ ('%a %b %-d %b %X', 'America/New_York'), ('%X', 'Etc/GMT+9') ]
+    format = [('%a %b %-d %b %X', 'America/New_York'), ('%X', 'Etc/GMT+9')]
 }
-```
 
-if backend(s) are provided they should be given as a dict with the key being
-the backend name and the value being a dict of the backend settings
-
-```
+# if backend(s) are provided they should be given as a dict with the key being
+# the backend name and the value being a dict of the backend settings
 i3pystatus weather {
     module = 'weather'
     format = '{condition} {current_temp}{temp_unit}[ {icon}]'
@@ -29,26 +33,18 @@ i3pystatus weather {
         }
     }
 }
-```
 
-backends that have no configuration should be defined as shown here
-
-```
+# backends that have no configuration should be defined as shown here
 i3pystatus updates{
     module = 'updates'
     backends = {'dnf.Dnf': {}}
 }
 ```
 
-Configuration parameters:
-    module: name of the i3pystatus module (default None)
-
-    (additional parameters as per the i3pystatus module)
-
-Requires:
-    i3pystatus: i3status replacement written in python
-
 @author tobes
+
+SAMPLE OUTPUT
+{'full_text': 'i3pystatus module'}
 """
 
 import os
@@ -66,23 +62,21 @@ MIN_CHECK_INTERVAL = 15  # the minimum time between checking the modules output
 MAX_AUTO_TIMEOUT = 30  # the longest we'll leave it without checking the output
 
 CLICK_EVENTS = [
-    'on_leftclick',
-    'on_middleclick',
-    'on_rightclick',
-    'on_upscroll',
-    'on_downscroll',
-
-    'on_unhandledclick',
+    "on_leftclick",
+    "on_middleclick",
+    "on_rightclick",
+    "on_upscroll",
+    "on_downscroll",
+    "on_unhandledclick",
 ]
 
 DBL_CLICK_EVENTS = [
-    'on_doubleleftclick',
-    'on_doublemiddleclick',
-    'on_doublerightclick',
-    'on_doubleupscroll',
-    'on_doubledownscroll',
-
-    'on_doubleunhandledclick',
+    "on_doubleleftclick",
+    "on_doublemiddleclick",
+    "on_doublerightclick",
+    "on_doubleupscroll",
+    "on_doubledownscroll",
+    "on_doubleunhandledclick",
 ]
 
 # we can only have one status running ever
@@ -95,19 +89,25 @@ def get_backends():
     Get backends info so that we can find the correct one.
     We just look in the directory structure to find modules.
     """
-    IGNORE_DIRS = ['core', 'tools', 'utils']
+    IGNORE_DIRS = ["core", "tools", "utils"]
 
     global backends
     if backends is None:
         backends = {}
         i3pystatus_dir = os.path.dirname(i3pystatus.__file__)
-        subdirs = [x for x in next(os.walk(i3pystatus_dir))[1]
-                   if not x.startswith('_') and x not in IGNORE_DIRS]
+        subdirs = [
+            x
+            for x in next(os.walk(i3pystatus_dir))[1]
+            if not x.startswith("_") and x not in IGNORE_DIRS
+        ]
         for subdir in subdirs:
             dirs = next(os.walk(os.path.join(i3pystatus_dir, subdir)))[2]
             backends.update(
-                {x[:-3]: 'i3pystatus.%s.%s' % (subdir, x[:-3])
-                 for x in dirs if not x.startswith('_') and x.endswith('.py')}
+                {
+                    x[:-3]: "i3pystatus.%s.%s" % (subdir, x[:-3])
+                    for x in dirs
+                    if not x.startswith("_") and x.endswith(".py")
+                }
             )
     return backends
 
@@ -133,9 +133,7 @@ class ClickTimer:
         self.parent = parent
         self.last_button = None
         self.clicks = 0
-        self.click_time = getattr(
-            self.parent.module, 'multi_click_timeout', 0.25
-        )
+        self.click_time = getattr(self.parent.module, "multi_click_timeout", 0.25)
         self.timer = None
 
     def trigger(self):
@@ -196,12 +194,34 @@ class ClickTimer:
             self.timer.start()
 
 
+STRING_NOT_SUPPORTED = "python2 not supported"
+STRING_NOT_INSTALLED = "not installed"
+STRING_MISSING_MODULE = "missing module"
 SKIP_ATTRS = [
-    'on_click',
-    'run',
-    'post_config_hook',
-    'module',
-    'py3',
+    "align",
+    "allow_urgent",
+    "background",
+    "border",
+    "border_bottom",
+    "border_left",
+    "border_right",
+    "border_top",
+    "markup",
+    "min_length",
+    "min_width",
+    "module",
+    "on_click",
+    "position",
+    "post_config_hook",
+    "py3",
+    "run",
+    "separator",
+    "separator_block_width",
+    "urgent_border",
+    "urgent_border_bottom",
+    "urgent_border_left",
+    "urgent_border_right",
+    "urgent_border_top",
 ]
 
 
@@ -209,54 +229,51 @@ class Py3status:
     """
     """
 
+    # available configuration parameters
     module = None
 
     def post_config_hook(self):
-        if i3pystatus is None:
-            raise Exception('i3pystatus is not installed')
-
         if self.py3.is_python_2():
-            raise Exception('Python 2 not supported by i3pystatus :(')
-
-        if not self.module:
-            raise Exception('No module selected')
+            raise Exception(STRING_NOT_SUPPORTED)
+        elif not i3pystatus:
+            raise Exception(STRING_NOT_INSTALLED)
+        elif not self.module:
+            raise Exception(STRING_MISSING_MODULE)
 
         settings = {}
         for attribute in dir(self):
-            if attribute.startswith('__') or attribute in SKIP_ATTRS:
+            if attribute.startswith("__") or attribute in SKIP_ATTRS:
                 continue
             settings[attribute] = getattr(self, attribute)
 
         # backends
         backend_type = None
-        if 'backend' in settings:
-            backend_type = 'backend'
-        elif 'backends' in settings:
-            backend_type = 'backends'
+        if "backend" in settings:
+            backend_type = "backend"
+        elif "backends" in settings:
+            backend_type = "backends"
 
         if backend_type:
             backends = settings[backend_type]
             backends_initiated = []
             for key, value in backends.items():
-                mod_info = key.split('.')
+                mod_info = key.split(".")
                 backend_module = import_module(get_backends().get(mod_info[0]))
                 try:
                     backend = getattr(backend_module, mod_info[1])(**value)
                 except i3pystatus.core.exceptions.ConfigMissingError as e:
                     msg = e.message
                     msg = (
-                        'i3pystatus module `{}` backend `{}`'
-                        'missing configuration options {}'
-                    ).format(
-                        self.module, key, msg[msg.index('{'):]
-                    )
+                        "i3pystatus module `{}` backend `{}`"
+                        "missing configuration options {}"
+                    ).format(self.module, key, msg[msg.index("{") :])
                     self.py3.notify_user(msg)
-                    raise Exception('Missing configuration options')
+                    raise Exception("Missing configuration options")
                 backends_initiated.append(backend)
-            if backend_type == 'backend':
-                settings['backend'] = backends_initiated[0]
+            if backend_type == "backend":
+                settings["backend"] = backends_initiated[0]
             else:
-                settings['backends'] = backends_initiated
+                settings["backends"] = backends_initiated
 
         # i3pystatus.Status can only exist once
         # so create it and share
@@ -271,21 +288,20 @@ class Py3status:
             module = finder.instanciate_class_from_module(self.module, **settings)
         except i3pystatus.core.exceptions.ConfigMissingError as e:
             msg = e.message
-            msg = 'i3pystatus module `{}` missing configuration options {}'.format(
-                self.module, msg[msg.index('{'):]
+            msg = "i3pystatus module `{}` missing configuration options {}".format(
+                self.module, msg[msg.index("{") :]
             )
             self.py3.notify_user(msg)
-            raise Exception('Missing configuration options')
+            raise Exception("Missing configuration options")
         status.register(module)
         self.module = module
 
         self.is_interval_module = isinstance(module, i3pystatus.IntervalModule)
         # modules update their output independently so we need to periodically
-        # check if it has been updated.  For modules with long intervals it is
-        # important to do this output check much more regularly thank the
-        # interval.
+        # check if it has been updated. For modules with long intervals it is
+        # important to do output check much more regularly than the interval.
         self._cache_timeout = min(
-            getattr(module, 'interval', MIN_CHECK_INTERVAL), MIN_CHECK_INTERVAL
+            getattr(module, "interval", MIN_CHECK_INTERVAL), MIN_CHECK_INTERVAL
         )
 
         # get callbacks available, useful for deciding if double clicks exist
@@ -296,34 +312,44 @@ class Py3status:
             callbacks.append((click, dbclick))
 
         self._click_timer = ClickTimer(self, callbacks)
-        self._last_content = None
+        self._last_content = {}
         self._timeout = 1
 
     def run(self):
-        output = self.module.output or {'full_text': ''}
+        output = self.module.output or {"full_text": ""}
+
+        variables = []
+        for var in [output, self._last_content]:
+            if "composite" in var:
+                var = var["composite"][0]
+            for key in ["name", "instance"]:
+                if key in var:
+                    del var[key]
+            variables.append(var)
+        output, self._last_content = variables
 
         if self._last_content != output:
             self._last_content = output
             self._timeout = 1
+            full_text = output.get("full_text", "")
+            # which modules return tuples?
+            if isinstance(full_text, tuple):
+                full_text = full_text[0]
+            if full_text:
+                output["full_text"] = self.py3.safe_format(full_text)
         else:
             self._timeout *= 2
             if self._timeout > MAX_AUTO_TIMEOUT:
                 self._timeout = MAX_AUTO_TIMEOUT
 
-        # some modules return tuples
-        if isinstance(output['full_text'], tuple):
-            output['full_text'] = output['full_text'][0]
-
         if self.is_interval_module:
-            output['cached_until'] = self.py3.time_in(
-                sync_to=min(self._cache_timeout, self._timeout)
-            )
+            interval = min(self._cache_timeout, self._timeout)
         else:
-            output['cached_until'] = self.py3.time_in(
-                sync_to=self._timeout
-            )
+            interval = self._timeout
+
+        output["cached_until"] = self.py3.time_in(sync_to=interval)
 
         return output
 
     def on_click(self, event):
-        self._click_timer.event(event['button'])
+        self._click_timer.event(event["button"])

@@ -111,23 +111,22 @@ class Events(Thread):
         """
         index = event.get("index")
         module_info = self.py3_wrapper.output_modules.get(module_name)
-        if module_info:
-            output = module_info["module"].get_latest()
-            full_text = u"".join([out["full_text"] for out in output])
+        output = module_info["module"].get_latest()
+        full_text = u"".join([out["full_text"] for out in output])
 
-            partial = None
-            if index is not None:
-                if isinstance(index, int):
-                    partial = output[index]
-                else:
-                    for item in output:
-                        if item.get("index") == index:
-                            partial = item
-                            break
-            if partial:
-                partial_text = partial["full_text"]
+        partial = None
+        if index is not None:
+            if isinstance(index, int):
+                partial = output[index]
             else:
-                partial_text = full_text
+                for item in output:
+                    if item.get("index") == index:
+                        partial = item
+                        break
+        if partial:
+            partial_text = partial["full_text"]
+        else:
+            partial_text = full_text
         return full_text, partial_text
 
     def on_click_dispatcher(self, module_name, event, command):
@@ -151,19 +150,20 @@ class Events(Thread):
                 command = command.replace("$OUTPUT", shell_quote(full_text))
 
             # this is a i3 message
-            self.i3_msg(module_name, command)
+            self.wm_msg(module_name, command)
             # to make the bar more responsive to users we ask for a refresh
             # of the module or of i3status if the module is an i3status one
             self.py3_wrapper.refresh_modules(module_name)
 
-    def i3_msg(self, module_name, command):
+    def wm_msg(self, module_name, command):
         """
-        Execute the given i3 message and log its output.
+        Execute the message with i3-msg or swaymsg and log its output.
         """
-        i3_msg_pipe = Popen(["i3-msg", command], stdout=PIPE)
+        wm_msg = self.config["wm"]["msg"]
+        pipe = Popen([wm_msg, command], stdout=PIPE)
         self.py3_wrapper.log(
-            'i3-msg module="{}" command="{}" stdout={}'.format(
-                module_name, command, i3_msg_pipe.stdout.read()
+            '{} module="{}" command="{}" stdout={}'.format(
+                wm_msg, module_name, command, pipe.stdout.read()
             )
         )
 
@@ -209,7 +209,9 @@ class Events(Thread):
         """
         if self.config["debug"]:
             self.py3_wrapper.log("received event {}".format(event))
+
         # usage variables
+        event["index"] = event.get("index", "")
         instance = event.get("instance", "")
         name = event.get("name", "")
 
@@ -238,8 +240,6 @@ class Events(Thread):
 
         default_event = False
         module_info = self.output_modules.get(module_name)
-        if not module_info:
-            return
         module = module_info["module"]
         # execute any configured i3-msg command
         # we do not do this for containers
